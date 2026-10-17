@@ -191,6 +191,18 @@ describe('Tutor on Bedrock (reply tool)', () => {
     expect(retry[0]).toMatchObject({ type: 'tool_result', tool_use_id: 'toolu_bad', is_error: true })
   })
 
+  it('asks again once when the first reply has no problem', async () => {
+    const { client, calls } = fakeClient([
+      asTool({ problem: null, turn: wireTurn, recap: null }, 'toolu_1'),
+      asTool({ problem, turn: wireTurn, recap: null }, 'toolu_2')
+    ])
+    const reply = await new Tutor(transport(client, 'tool')).start({ text: 'p' })
+    expect(reply.problem?.title).toBe('t')
+    const retry = (calls[1].messages as Msg[])[2].content
+    expect(retry[0]).toMatchObject({ type: 'tool_result', tool_use_id: 'toolu_1' })
+    expect(retry[1].text).toContain('"problem" was null')
+  })
+
   it('switches to the plain client if the refusal-fallback beta is rejected', async () => {
     const rejecting: ClaudeClient = {
       beta: {

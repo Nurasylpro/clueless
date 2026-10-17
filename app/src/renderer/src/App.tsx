@@ -105,16 +105,18 @@ function Overlay() {
       <div
         ref={panel}
         className={
-          'glass-panel relative flex flex-col overflow-hidden rounded-2xl text-zinc-900 shadow-xl dark:text-zinc-100 ' +
+          // overflow-clip, not overflow-hidden: a hidden box can still be scrolled (focusing the
+          // answer box did that), which pushed the header out of the top of a short panel.
+          'glass-panel relative flex flex-col overflow-clip rounded-2xl text-zinc-900 shadow-xl dark:text-zinc-100 ' +
           (glass === 'clear' ? 'glass-clear ' : '') +
-          (size.height && !compact ? 'panel-fixed ' : '') +
           (isMock ? 'w-[400px]' : 'w-full')
         }
         style={
           {
             '--glass': GLASS_ALPHA[glass],
             maxHeight: window.screen.availHeight - 64,
-            height: size.height && !compact ? size.height : undefined
+            // The dragged height is a minimum: a longer reply grows the panel (up to maxHeight).
+            minHeight: size.height && !compact ? Math.min(size.height, window.screen.availHeight - 64) : undefined
           } as React.CSSProperties
         }
       >

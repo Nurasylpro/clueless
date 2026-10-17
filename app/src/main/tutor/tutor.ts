@@ -115,7 +115,14 @@ export class Tutor implements TutorLike {
     if (input.history) lines.push(`[STUDENT HISTORY] ${input.history}`)
     // The first call is the hard one (understand the problem, write the hidden solution), so it
     // thinks harder. Later turns are short and run at low effort for speed.
-    return this.request({ text: lines.join('\n'), image: input.image }, 'medium')
+    const reply = await this.request({ text: lines.join('\n'), image: input.image }, 'medium')
+    if (reply.problem) return reply
+    // Without "problem" the app has no subject, title or hidden solution: ask once more.
+    this.log('tutor: first reply had no problem, asking again')
+    return this.request(
+      { text: '[FORMAT] "problem" was null. Reply to [NEW PROBLEM] again, with "problem" filled in.' },
+      'medium'
+    )
   }
 
   async send(input: SendInput): Promise<TutorReplyT> {

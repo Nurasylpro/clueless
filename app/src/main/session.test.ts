@@ -58,6 +58,15 @@ describe('SessionController', () => {
     expect(json).not.toContain('x^2*e^x')
   })
 
+  it('still opens a usable session when Claude never names the problem', async () => {
+    const { tutor, controller, last } = setup()
+    tutor.start = async () => ({ problem: null, turn: turn(), recap: null })
+    await controller.startProblem({ text: 'something' })
+    expect(last().problem).toMatchObject({ subject: 'other', title: 'Your problem' })
+    await controller.action('hint')
+    expect(tutor.sent.at(-1)?.tag).toBe('HINT')
+  })
+
   it('runs the math checker on the answer and tells the tutor the result', async () => {
     const { controller, tutor, last } = setup()
     await controller.startProblem({ text: 'integrate' })

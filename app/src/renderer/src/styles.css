@@ -153,17 +153,21 @@ body.mock-desktop {
   }
 }
 
-/* The student dragged the panel taller: the latest reply fills the extra room and scrolls. */
-.panel-fixed > .session-screen {
-  flex: 1 1 auto;
-}
-.panel-fixed .exchange {
+/* The panel grows with its content (a dragged height is only a minimum, and the reply fills any
+   extra room). Once it hits the screen-height cap, only the latest reply shrinks and scrolls;
+   the header, problem bar, plan, buttons and answer box keep their size. */
+.glass-panel > .session-screen {
   flex: 1 1 auto;
   min-height: 0;
-  overflow-y: auto;
 }
-.panel-fixed .msg-scroll {
-  max-height: none;
+.session-screen > * {
+  flex-shrink: 0;
+}
+.session-screen > .exchange {
+  flex: 1 1 auto;
+  /* Even when squeezed, the reply keeps its own height or ~5 lines, whichever is smaller. */
+  min-height: calc-size(max-content, min(size, 7.5rem));
+  overflow-y: auto;
 }
 
 /* Mic button while connecting */

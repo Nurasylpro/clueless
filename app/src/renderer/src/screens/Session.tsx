@@ -237,7 +237,7 @@ function TutorCard({ turn, onReadAloud }: { turn: TurnView; onReadAloud: () => v
           )}
         </div>
       )}
-      <div className="msg-scroll max-h-[300px] overflow-y-auto">
+      <div>
         <Markdown text={turn.message} />
         {turn.visual && turn.visual.frames.length > 0 && <VisualSlot visual={turn.visual} />}
       </div>
@@ -399,7 +399,7 @@ function ErrorBox({ message, canRetry, onDismiss }: { message: string; canRetry:
 
 function QuickActions({ session, disabled }: { session: SessionView; disabled: boolean }) {
   return (
-    <div className="flex justify-between gap-0.5 border-t border-zinc-900/10 px-3 pt-1.5 dark:border-white/10">
+    <div className="flex flex-wrap justify-between gap-0.5 border-t border-zinc-900/10 px-3 pt-1.5 dark:border-white/10">
       <Button variant="chip" disabled={disabled} onClick={() => api.action('hint')} title="A slightly bigger hint">
         Hint
       </Button>

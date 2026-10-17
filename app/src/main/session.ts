@@ -20,6 +20,15 @@ import { TutorError, type ImageInput, type SendInput, type TutorLike } from './t
 
 export const REVEAL_AFTER_ATTEMPTS = 3
 
+/** Used when Claude never names the problem. The student can still fix the subject in the UI. */
+const FALLBACK_PROBLEM: ProblemInfo = {
+  subject: 'other',
+  title: 'Your problem',
+  summary: '',
+  language: null,
+  hiddenSolution: ''
+}
+
 export interface ControllerDeps {
   /** A fresh tutor for a new problem, or null when there's no API key. */
   makeTutor(): TutorLike | null
@@ -72,7 +81,10 @@ export class SessionController {
         const reply = await this.call('Reading your screen…', () =>
           tutor.start({ ...input, history: this.deps.memory.historySummary() })
         )
-        if (reply) this.applyReply(reply)
+        if (!reply) return
+        // Still no problem after the tutor's retry: fill in a stand-in so the session (answer box,
+        // buttons, actions) works anyway instead of getting stuck without them.
+        this.applyReply(reply.problem ? reply : { ...reply, problem: { ...FALLBACK_PROBLEM } })
       }
       await this.attempt(run)
     })
