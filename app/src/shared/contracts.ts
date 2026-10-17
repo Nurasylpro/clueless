@@ -189,6 +189,7 @@ export const IPC = {
   setSubject: 'user:subject', // Subject
   windowMode: 'window:mode', // WindowMode
   fitHeight: 'window:fit-height', // number: the panel's height in px; the window follows it
+  resizeWidth: 'window:resize-width', // { width, anchor }: the student dragged a side edge
   hide: 'window:hide',
   quit: 'app:quit',
   openScreenSettings: 'app:open-screen-settings',
@@ -239,6 +240,8 @@ export interface CluelessApi {
   setSubject(subject: Subject): void
   setWindowMode(mode: WindowMode): void
   fitHeight(px: number): void
+  /** Set the window width; `anchor` is the edge that stays put. */
+  resizeWidth(width: number, anchor: 'left' | 'right'): void
   hide(): void
   quit(): void
   openScreenSettings(): void

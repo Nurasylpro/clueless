@@ -39,7 +39,15 @@ export const MOCK_TURNS: TurnView[] = [
   {
     ...base,
     kind: 'question',
-    message: 'Before any code: what **3 rules** must a valid board follow?',
+    message: 'Sudoku validator. What’s tripping you up?',
+    expects: 'choice',
+    choices: [
+      'Don’t know where to start',
+      'Not sure what makes a board valid',
+      'Stuck on checking the 3×3 boxes',
+      'Forgot how to make a list of sets',
+      'My output is wrong'
+    ],
     plan: plan(1)
   },
   {

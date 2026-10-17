@@ -160,6 +160,7 @@ export function createMockApi(): CluelessApi {
     },
     setWindowMode: () => {},
     fitHeight: () => {},
+    resizeWidth: () => {},
     hide: () => console.log('[mock] hide'),
     quit: () => console.log('[mock] quit'),
     openScreenSettings: () => {},

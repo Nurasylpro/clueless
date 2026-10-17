@@ -20,6 +20,7 @@ const api: CluelessApi = {
   setSubject: (subject) => ipcRenderer.send(IPC.setSubject, subject),
   setWindowMode: (mode) => ipcRenderer.send(IPC.windowMode, mode),
   fitHeight: (px) => ipcRenderer.send(IPC.fitHeight, px),
+  resizeWidth: (width, anchor) => ipcRenderer.send(IPC.resizeWidth, { width, anchor }),
   hide: () => ipcRenderer.send(IPC.hide),
   quit: () => ipcRenderer.send(IPC.quit),
   openScreenSettings: () => ipcRenderer.send(IPC.openScreenSettings),

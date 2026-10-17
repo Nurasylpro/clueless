@@ -52,7 +52,7 @@
 - [ ] Check speed: each turn should take under ~3 s after the first (the terminal log shows ms and cached tokens)
 - [ ] Have someone run it on **Windows** (`npm run dev`) and fix whatever breaks
 - [ ] Record a backup demo video
-- [ ] Pitch: the problem (Cluely + the UPenn study) → 3 demos → recap and gap map → "visible by design"
+- [ ] Pitch: the problem (the UPenn study) → 3 demos → recap and gap map
 
 ## Rasim: visuals
 
