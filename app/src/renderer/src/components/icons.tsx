@@ -140,3 +140,38 @@ export const DropIcon = (p: IconProps) => (
     <path d="M12 2.7s6 6.4 6 11.3a6 6 0 0 1-12 0c0-4.9 6-11.3 6-11.3Z" />
   </Icon>
 )
+
+export const SpeakerIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M11 5 6 9H3v6h3l5 4z" />
+    <path d="M15.5 8.5a5 5 0 0 1 0 7" />
+    <path d="M18.5 5.5a9 9 0 0 1 0 13" />
+  </Icon>
+)
+
+export const SpeakerOffIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M11 5 6 9H3v6h3l5 4z" />
+    <path d="m16 9 5 6" />
+    <path d="m21 9-5 6" />
+  </Icon>
+)
+
+export const PauseIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M9 5v14" />
+    <path d="M15 5v14" />
+  </Icon>
+)
+
+export const PlayIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="m7 4 13 8-13 8z" />
+  </Icon>
+)
+
+export const StopIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="6" y="6" width="12" height="12" rx="1.5" />
+  </Icon>
+)

@@ -186,6 +186,7 @@ export function createMockApi(): CluelessApi {
       voiceStates.add(cb)
       return () => voiceStates.delete(cb)
     },
-    onVoiceToggle: () => () => {}
+    onVoiceToggle: () => () => {},
+    tts: async () => ({ ok: false, reason: 'no-key', message: 'ElevenLabs runs in the desktop app.' })
   }
 }

@@ -28,6 +28,7 @@ import { StuckDetector } from './stuck/detector'
 import { createTransport, providerInfo } from './tutor/provider'
 import { Tutor, type ImageInput } from './tutor/tutor'
 import { VoiceManager, type SocketLike } from './voice/deepgram'
+import { ElevenLabs } from './voice/elevenlabs'
 import { createTray } from './windows/tray'
 import { createOverlay, fitPanelHeight, resizePanelWidth, resolveAreaSelection, selectArea } from './windows/windows'
 
@@ -240,6 +241,15 @@ function setup(): void {
     if (systemPreferences.getMediaAccessStatus('microphone') === 'granted') return true
     return systemPreferences.askForMediaAccess('microphone')
   })
+  const elevenLabs = new ElevenLabs(
+    () => {
+      loadKeys() // pick up a key added since launch
+      return process.env
+    },
+    fetch,
+    log
+  )
+  ipcMain.handle(IPC.voiceTts, (_e, req: unknown) => elevenLabs.speak(req))
   ipcMain.on(IPC.voiceStart, (_e, id: unknown) => voice.start(id))
   ipcMain.on(IPC.voiceAudio, (_e, arg: { id?: unknown; chunk?: unknown }) => voice.audio(arg?.id, arg?.chunk))
   ipcMain.on(IPC.voiceStop, (_e, id: unknown) => voice.stop(id))
