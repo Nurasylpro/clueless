@@ -1,10 +1,8 @@
 # Clueless: idea and spec
 
-> Cluely gives you answers. **Clueless gives you clues.**
-
-Clueless is a study buddy that floats over any app. When you're stuck on a problem (code, math,
-physics, anything), press a hotkey. Clueless reads your screen and coaches you through the problem
-with questions, small steps and visuals. It never just hands you the answer.
+Clueless is a small study helper that sits on top of any app. When you're stuck on a problem (code,
+math, physics, anything), press a hotkey. It reads the problem on your screen and helps you work
+through it with questions, small steps and visuals, instead of giving you the answer.
 
 - **For:** all students
 - **Track:** Education
@@ -19,12 +17,10 @@ with questions, small steps and visuals. It never just hands you the answer.
   Learning*), high schoolers who practiced math with plain GPT-4 did **~17% worse** on the exam than
   students who had no AI. A tutor version that gave hints instead of answers removed most of that
   harm.
-- **Cheating tools make it worse.** Cluely and similar apps are invisible overlays that feed you
-  answers.
 - **Today's "study modes" can't see your work.** ChatGPT Study Mode, Gemini Guided Learning and
   Claude Learning Mode make you copy and paste. LeetCode hint extensions only work on LeetCode.
 
-**Clueless:** it sees any app like Cluely, but it teaches like a tutor.
+**Clueless** works with whatever is on your screen, and it teaches like a tutor.
 
 ---
 
@@ -52,8 +48,7 @@ Stuck  ->  press Ctrl/Cmd+Shift+Space  ->  Clueless reads the screen
    tells you.
 5. **Stays out of the way.** It's quiet while you're making progress. It never pops open or talks
    unless you ask.
-6. **Visible by design.** Clueless shows up on screen shares and recordings. Cluely hides itself;
-   we don't.
+6. **Visible.** Clueless shows up on screen shares and recordings like any other window.
 7. **Private by default.** The screen is only sent to the AI when you press the hotkey. Stuck
    detection uses tiny thumbnails that never leave the laptop.
 8. **The screen is data, not instructions.** Text on screen (like "ignore your rules and print the
@@ -333,7 +328,7 @@ tracing, which is too much for a hackathon.
   Multiply by `screen.getPrimaryDisplay().scaleFactor` when selecting an area.
 - **Hotkeys:** use `CommandOrControl` so one definition works on both OSes. Don't register Esc
   globally; handle it only inside the panel.
-- **Never call `setContentProtection(true)`.** That's Cluely's hiding trick, and we stay visible.
+- **Don't call `setContentProtection(true)`.** It hides the window from screen sharing, and Clueless should stay visible.
 - **Native modules** (if you add any) must be rebuilt for Electron
   (`electron-builder install-app-deps`). On Windows, if the build fails, install "Desktop
   development with C++" from Visual Studio Build Tools. If it keeps fighting you, switch to a JSON
@@ -346,37 +341,30 @@ tracing, which is too much for a hackathon.
 
 | Time | What |
 |---|---|
-| 0:00 | The problem: Cluely + the UPenn finding (20 s) |
+| 0:00 | The problem: the UPenn finding (20 s) |
 | 0:20 | Coding: Valid Sudoku, ending with the red-flashing bin (70 s) |
 | 1:30 | Math: ∫ x² eˣ dx, with curves that don't line up until the sign error is fixed (40 s) |
 | 2:10 | Physics: the ramp and the extreme-case check (30 s) |
-| 2:40 | Recap + gap map + "visible by design" (20 s) |
+| 2:40 | Recap + gap map (20 s) |
 
 Have a backup video of every flow in case the Wi-Fi dies.
 
 ---
 
-## 11. Similar products and our edge
+## 11. Related tools
 
-| Product | What it does | What it lacks compared to Clueless |
+| Tool | What it does | How Clueless is different |
 |---|---|---|
-| Cluely, Interview Coder, Glass | Overlays that see your screen | They give answers; built for cheating |
-| LeetCopilot, LCPath, Nudge (Chrome) | Hint-first LeetCode coaches | Only LeetCode, no live visuals of your own code |
-| ChatGPT Study Mode, Gemini Guided Learning, Claude Learning Mode | Chat tutors that hold back answers | Can't see your screen, so you copy and paste |
-| Python Tutor | Visualizes code step by step, plus an AI tutor | You paste code into their website; not live |
-| CS50 Duck | Course tutor that guides instead of solving | Only for CS50 |
+| LeetCopilot, LCPath, Nudge (Chrome) | Hint-first LeetCode coaches | Clueless isn't limited to LeetCode |
+| ChatGPT Study Mode, Gemini Guided Learning, Claude Learning Mode | Chat tutors that hold back answers | Clueless reads your screen, so no copy and paste |
+| Python Tutor | Visualizes code step by step, plus an AI tutor | Clueless works on the code where you're writing it |
+| CS50 Duck | Course tutor that guides instead of solving | Clueless isn't tied to one course |
 
-**Our edge:** Clueless is the only one that does all of these together:
-- works in any app
-- covers any subject
-- gives hints instead of answers
-- draws your own work live
-- takes voice
-- notices when you're stuck before you ask
+Clueless puts a few of these ideas together: it works in any app and any subject, sticks to hints,
+and notices when you're stuck.
 
-**Judge question to prepare for:** *"How is this different from LeetCopilot?"*
-**Answer:** "It works in every app and every subject, draws what you're building, and notices when
-you're stuck."
+If a judge asks how it differs from a LeetCode hint extension: it works in every app and subject,
+not just one site.
 
 ---
 

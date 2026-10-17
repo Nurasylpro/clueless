@@ -47,8 +47,8 @@ export function createOverlay(): BrowserWindow {
   // 'screen-saver' keeps it above full-screen windows (and above browsers in F11 on Windows).
   win.setAlwaysOnTop(true, 'screen-saver')
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
-  // Never call win.setContentProtection(true): that's how Cluely hides from screen share.
-  // Clueless stays visible by design.
+  // Don't call win.setContentProtection(true): it hides the window from screen sharing, and
+  // Clueless should stay visible.
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//.test(url)) void shell.openExternal(url)
     return { action: 'deny' }
