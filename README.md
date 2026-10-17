@@ -2,7 +2,7 @@
 
 > Cluely gives you answers. **Clueless gives you clues.**
 
-A see-through study panel that floats over any app. Stuck on a problem (code, math, physics, anything)?
+A small see-through panel (in Claude orange) that floats over any app, full-screen apps included. Stuck on a problem (code, math, physics, anything)?
 Press **Ctrl/Cmd+Shift+Space**. Clueless reads your screen and coaches you through the problem with
 questions and small steps. It never just hands you the answer.
 
@@ -17,6 +17,7 @@ questions and small steps. It never just hands you the answer.
 - **A math engine checks answers** (math.js), so a right answer is never marked wrong by an AI arithmetic slip
 - **Notices when you're stuck:** the screen hasn't changed, 3 wrong answers in a row, or you opened ChatGPT or Chegg
 - **Memory:** a recap after each problem, flashcards (spaced repetition) and a gap map
+- **Small by design:** the panel shows only your latest input and Clueless's latest reply, and it sizes itself to fit
 - **Visible by design:** it shows up on screen share and doesn't hide the way Cluely does
 
 ## Status

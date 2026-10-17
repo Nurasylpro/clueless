@@ -9,11 +9,11 @@ type Variant = 'primary' | 'secondary' | 'ghost' | 'chip'
 
 const VARIANTS: Record<Variant, string> = {
   primary:
-    'bg-amber-400 text-zinc-950 hover:bg-amber-300 font-medium shadow-sm disabled:bg-zinc-200 disabled:text-zinc-400 dark:disabled:bg-white/10 dark:disabled:text-zinc-600',
+    'bg-claude-500 text-white hover:bg-claude-400 font-medium shadow-sm disabled:bg-zinc-200 disabled:text-zinc-400 dark:disabled:bg-white/10 dark:disabled:text-zinc-600',
   secondary:
     'border border-zinc-900/10 bg-white/70 text-zinc-800 hover:bg-zinc-50 dark:border-white/15 dark:bg-white/10 dark:text-zinc-100 dark:hover:bg-zinc-700',
   ghost: 'text-zinc-500 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-white/10 dark:hover:text-zinc-100',
-  chip: 'border border-zinc-900/10 bg-white/70 text-zinc-700 hover:border-amber-400 hover:text-zinc-950 dark:border-white/15 dark:bg-black/40 dark:text-zinc-200 dark:hover:border-amber-400 dark:hover:text-white'
+  chip: 'border border-zinc-900/10 bg-white/70 text-zinc-700 hover:border-claude-500 hover:text-zinc-950 dark:border-white/15 dark:bg-black/40 dark:text-zinc-200 dark:hover:border-claude-500 dark:hover:text-white'
 }
 
 export function Button({
@@ -27,7 +27,7 @@ export function Button({
       type="button"
       className={cx(
         'no-drag inline-flex items-center justify-center rounded-lg transition-colors disabled:cursor-not-allowed disabled:opacity-50',
-        variant === 'chip' ? 'h-7 gap-1 px-1.5 text-[11.5px]' : 'h-9 gap-1.5 px-3 text-sm',
+        variant === 'chip' ? 'h-7 gap-1 whitespace-nowrap px-2 text-[11.5px]' : 'h-9 gap-1.5 px-3 text-sm',
         VARIANTS[variant],
         className
       )}

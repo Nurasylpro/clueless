@@ -41,7 +41,7 @@ export function MicButton({
         state === 'listening' && 'bg-rose-500 text-white hover:bg-rose-500 hover:text-white dark:text-white dark:hover:bg-rose-500',
         state === 'starting' && 'bg-rose-500/20 text-rose-600 dark:text-rose-300',
         state === 'error' && 'text-rose-500 dark:text-rose-400',
-        (state === 'finishing' || processing) && 'text-amber-500 dark:text-amber-400'
+        (state === 'finishing' || processing) && 'text-claude-500 dark:text-claude-400'
       )}
     >
       {state === 'listening' && (

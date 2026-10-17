@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AppStatus, MemoryView, SessionView } from '../../shared/contracts'
 import { api, isMock } from './api'
 import { AreaSelector } from './screens/AreaSelector'
@@ -57,6 +57,23 @@ function Overlay() {
 
   const onMemory = useCallback((m: MemoryView) => setDueCards(m.dueCards.length), [])
 
+  // The window is exactly as tall as the panel: small when there's little to show.
+  const panel = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = panel.current
+    if (!el || isMock) return
+    let frame = 0
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => api.fitHeight(Math.ceil(el.getBoundingClientRect().height)))
+    })
+    observer.observe(el)
+    return () => {
+      observer.disconnect()
+      cancelAnimationFrame(frame)
+    }
+  }, [])
+
   const changeGlass = (g: Glass): void => {
     setGlass(g)
     try {
@@ -67,15 +84,16 @@ function Overlay() {
   }
 
   return (
-    <div className={isMock ? 'flex h-full items-start justify-end p-6' : 'h-full p-2'} data-app-ready>
+    <div className={isMock ? 'flex h-full items-start justify-end p-6' : 'p-2'} data-app-ready>
       {isMock && <MockDesktop />}
       <div
+        ref={panel}
         className={
-          'glass-panel relative flex flex-col overflow-hidden rounded-2xl text-zinc-900 shadow-2xl dark:text-zinc-100 ' +
+          'glass-panel relative flex flex-col overflow-hidden rounded-2xl text-zinc-900 shadow-xl dark:text-zinc-100 ' +
           (glass === 'clear' ? 'glass-clear ' : '') +
-          (isMock ? 'w-[424px] ' + (compact ? 'h-[68px]' : 'h-[704px] max-h-full') : 'h-full')
+          (isMock ? 'w-[400px]' : 'w-full')
         }
-        style={{ '--glass': GLASS_ALPHA[glass] } as React.CSSProperties}
+        style={{ '--glass': GLASS_ALPHA[glass], maxHeight: window.screen.availHeight - 64 } as React.CSSProperties}
       >
         <Header
           compact={compact}

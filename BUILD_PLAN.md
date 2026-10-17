@@ -12,6 +12,10 @@
   - Bedrock replies through a `reply` tool, validated, with one retry
   - client-side refusal fallback on Bedrock, server-side on the Claude API
 - [x] Works over **full-screen apps**: a macOS panel window, a menu-bar icon instead of the dock, and above F11 browsers on Windows
+  - Tested 2026-10-17 on macOS with a full-screen app. The panel stays on top, ⌘⇧Space brings it up without leaving full screen, typing works, and launching Clueless while in full screen works.
+- [x] Compact panel in Claude orange:
+  - shows only the latest input and reply
+  - the window sizes itself to the panel
 - [x] Tutor brain (Claude Opus 5.5):
   - structured replies (only 3 union fields, under the 16 limit)
   - prompt caching, effort `medium` on the first turn and `low` after
