@@ -315,7 +315,7 @@ export function fromWire(w: z.infer<typeof WireReply>): TutorReplyT {
   }
 }
 
-function errorMessage(err: unknown): string {
+export function errorMessage(err: unknown): string {
   if (err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
     return 'Claude rejected the credentials. Check ANTHROPIC_API_KEY, or your AWS credentials and Bedrock model access.'
   }

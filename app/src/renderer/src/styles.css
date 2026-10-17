@@ -141,3 +141,16 @@ body.mock-desktop {
     text-shadow: 0 1px 6px rgb(0 0 0 / 0.75);
   }
 }
+
+/* The island: the 4 s bar before an animation starts (READ_BEFORE_ANIMATION_MS). */
+@keyframes island-fill {
+  from {
+    width: 0%;
+  }
+  to {
+    width: 100%;
+  }
+}
+.island-fill {
+  animation: island-fill 4s linear forwards;
+}

@@ -9,7 +9,8 @@ files:
   - '!{electron.vite.config.mts,vite.ui.config.mts,vitest.config.mts,electron-builder.yml}'
   - '!{.env,.env.*,*.md}'
   - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
-asarUnpack: []
+asarUnpack:
+  - '**/node_modules/uiohook-napi/**' # native mouse hook (noticing highlights)
 mac:
   target: dmg
   category: public.app-category.education

@@ -14,7 +14,8 @@
     "ui": "vite --config vite.ui.config.mts",
     "try": "tsx scripts/try-tutor.mts",
     "dist:mac": "electron-vite build && electron-builder --mac",
-    "dist:win": "electron-vite build && electron-builder --win"
+    "dist:win": "electron-vite build && electron-builder --win",
+    "trace": "tsx scripts/try-trace.mts"
   },
   "dependencies": {
     "@anthropic-ai/bedrock-sdk": "^0.35.0",

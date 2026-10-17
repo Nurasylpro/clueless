@@ -1,6 +1,6 @@
 // Exposes a small, typed API to the UI as `window.clueless`. The UI never touches Node or IPC directly.
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC, type CluelessApi } from '../shared/contracts'
+import { IPC, ISLAND_IPC, type CluelessApi, type IslandApi } from '../shared/contracts'
 
 function listen<T>(channel: string, cb: (value: T) => void): () => void {
   const handler = (_: unknown, value: T): void => cb(value)
@@ -32,3 +32,19 @@ const api: CluelessApi = {
 }
 
 contextBridge.exposeInMainWorld('clueless', api)
+
+// The island and the Ask button.
+const island: IslandApi = {
+  getView: () => ipcRenderer.invoke(ISLAND_IPC.getView),
+  onView: (cb) => listen(ISLAND_IPC.view, cb),
+  setAnimate: (on) => ipcRenderer.send(ISLAND_IPC.setAnimate, on),
+  followUp: (text) => ipcRenderer.send(ISLAND_IPC.followUp, text),
+  closeCard: () => ipcRenderer.send(ISLAND_IPC.closeCard),
+  finishAnimation: () => ipcRenderer.send(ISLAND_IPC.finish),
+  hide: () => ipcRenderer.send(ISLAND_IPC.hide),
+  resize: (size) => ipcRenderer.send(ISLAND_IPC.resize, size),
+  holdCard: (hold) => ipcRenderer.send(ISLAND_IPC.hold, hold),
+  ask: () => ipcRenderer.send(ISLAND_IPC.ask)
+}
+
+contextBridge.exposeInMainWorld('island', island)
