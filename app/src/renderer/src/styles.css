@@ -152,3 +152,16 @@ body.mock-desktop {
     text-shadow: 0 1px 6px rgb(0 0 0 / 0.75);
   }
 }
+
+/* The student dragged the panel taller: the latest reply fills the extra room and scrolls. */
+.panel-fixed > .session-screen {
+  flex: 1 1 auto;
+}
+.panel-fixed .exchange {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.panel-fixed .msg-scroll {
+  max-height: none;
+}

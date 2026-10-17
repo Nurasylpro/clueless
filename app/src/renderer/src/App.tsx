@@ -18,6 +18,7 @@ function Overlay() {
   const [compact, setCompact] = useState(false)
   const [dueCards, setDueCards] = useState(0)
   const [glass, setGlass] = useState<Glass>(loadGlass)
+  const [size, setSize] = useState<PanelSize>(loadSize)
 
   useEffect(() => {
     if (isMock) document.body.classList.add('mock-desktop')
@@ -74,6 +75,21 @@ function Overlay() {
     }
   }, [])
 
+  // A saved width from last time: apply it once the window exists.
+  useEffect(() => {
+    if (!isMock && size.width) api.resizeWidth(size.width, 'right')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const changeSize = (next: PanelSize): void => {
+    setSize(next)
+    try {
+      localStorage.setItem('clueless.size', JSON.stringify(next))
+    } catch {
+      // storage unavailable: the size just won't persist
+    }
+  }
+
   const changeGlass = (g: Glass): void => {
     setGlass(g)
     try {
@@ -84,16 +100,23 @@ function Overlay() {
   }
 
   return (
-    <div className={isMock ? 'flex h-full items-start justify-end p-6' : 'p-2'} data-app-ready>
+    <div className={isMock ? 'flex h-full items-start justify-end p-6' : 'relative p-2'} data-app-ready>
       {isMock && <MockDesktop />}
       <div
         ref={panel}
         className={
           'glass-panel relative flex flex-col overflow-hidden rounded-2xl text-zinc-900 shadow-xl dark:text-zinc-100 ' +
           (glass === 'clear' ? 'glass-clear ' : '') +
+          (size.height && !compact ? 'panel-fixed ' : '') +
           (isMock ? 'w-[400px]' : 'w-full')
         }
-        style={{ '--glass': GLASS_ALPHA[glass], maxHeight: window.screen.availHeight - 64 } as React.CSSProperties}
+        style={
+          {
+            '--glass': GLASS_ALPHA[glass],
+            maxHeight: window.screen.availHeight - 64,
+            height: size.height && !compact ? size.height : undefined
+          } as React.CSSProperties
+        }
       >
         <Header
           compact={compact}
@@ -120,7 +143,109 @@ function Overlay() {
           </>
         )}
       </div>
+      {!isMock && !compact && <ResizeGrips panel={panel} size={size} onSize={changeSize} />}
     </div>
+  )
+}
+
+/** User-chosen panel size. null = default (416px wide, as tall as its content). */
+interface PanelSize {
+  width: number | null
+  height: number | null
+}
+
+function loadSize(): PanelSize {
+  try {
+    const saved = JSON.parse(localStorage.getItem('clueless.size') ?? 'null')
+    if (saved && typeof saved === 'object') {
+      return {
+        width: typeof saved.width === 'number' ? saved.width : null,
+        height: typeof saved.height === 'number' ? saved.height : null
+      }
+    }
+  } catch {
+    // storage unavailable or garbled: use the default
+  }
+  return { width: null, height: null }
+}
+
+type Edge = 'left' | 'right' | 'bottom' | 'bottom-left' | 'bottom-right'
+
+const GRIPS: { edge: Edge; className: string }[] = [
+  { edge: 'left', className: 'left-0 top-3 bottom-3 w-2.5 cursor-ew-resize' },
+  { edge: 'right', className: 'right-0 top-3 bottom-3 w-2.5 cursor-ew-resize' },
+  { edge: 'bottom', className: 'bottom-0 left-3 right-3 h-2.5 cursor-ns-resize' },
+  { edge: 'bottom-left', className: 'bottom-0 left-0 h-4 w-4 cursor-nesw-resize' },
+  { edge: 'bottom-right', className: 'bottom-0 right-0 h-4 w-4 cursor-nwse-resize' }
+]
+
+/**
+ * Drag handles on the panel's edges. Transparent windows can't be resized natively, so the
+ * width goes to the main process and the height becomes the panel's own (the window follows it).
+ * Double-click a handle to go back to the default size.
+ */
+function ResizeGrips({
+  panel,
+  size,
+  onSize
+}: {
+  panel: React.RefObject<HTMLDivElement | null>
+  size: PanelSize
+  onSize: (s: PanelSize) => void
+}) {
+  const start = (edge: Edge) => (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
+    e.preventDefault()
+    const el = e.currentTarget
+    el.setPointerCapture(e.pointerId)
+    const x0 = e.screenX
+    const y0 = e.screenY
+    const w0 = window.innerWidth
+    const h0 = panel.current?.getBoundingClientRect().height ?? 300
+    const maxH = window.screen.availHeight - 64
+    let next = { ...size }
+    const move = (ev: PointerEvent): void => {
+      const dx = ev.screenX - x0
+      const dy = ev.screenY - y0
+      if (edge !== 'bottom') {
+        const left = edge === 'left' || edge === 'bottom-left'
+        const width = Math.round(left ? w0 - dx : w0 + dx)
+        api.resizeWidth(width, left ? 'right' : 'left')
+        next = { ...next, width: Math.max(320, Math.min(width, 960)) }
+      }
+      if (edge.startsWith('bottom')) {
+        next = { ...next, height: Math.round(Math.max(160, Math.min(h0 + dy, maxH))) }
+        onSize(next)
+      }
+    }
+    const up = (): void => {
+      el.removeEventListener('pointermove', move)
+      el.removeEventListener('pointerup', up)
+      el.removeEventListener('pointercancel', up)
+      onSize(next)
+    }
+    el.addEventListener('pointermove', move)
+    el.addEventListener('pointerup', up)
+    el.addEventListener('pointercancel', up)
+  }
+
+  const reset = (): void => {
+    api.resizeWidth(416, 'right')
+    onSize({ width: null, height: null })
+  }
+
+  return (
+    <>
+      {GRIPS.map((g) => (
+        <div
+          key={g.edge}
+          className={'no-drag absolute z-50 ' + g.className}
+          onPointerDown={start(g.edge)}
+          onDoubleClick={reset}
+          title="Drag to resize · double-click to reset"
+        />
+      ))}
+    </>
   )
 }
 

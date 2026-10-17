@@ -28,7 +28,7 @@ import { StuckDetector } from './stuck/detector'
 import { createTransport, providerInfo } from './tutor/provider'
 import { Tutor, type ImageInput } from './tutor/tutor'
 import { createTray } from './windows/tray'
-import { createOverlay, fitPanelHeight, resolveAreaSelection, selectArea } from './windows/windows'
+import { createOverlay, fitPanelHeight, resizePanelWidth, resolveAreaSelection, selectArea } from './windows/windows'
 
 const HOTKEYS = { ask: 'CommandOrControl+Shift+Space', area: 'CommandOrControl+Shift+2' }
 const SMOKE = process.env.CLUELESS_SMOKE === '1'
@@ -209,6 +209,9 @@ function setup(): void {
   ipcMain.on(IPC.windowMode, () => {})
   ipcMain.on(IPC.fitHeight, (_e, px: number) => {
     if (overlay && typeof px === 'number') fitPanelHeight(overlay, px)
+  })
+  ipcMain.on(IPC.resizeWidth, (_e, arg: { width: number; anchor: 'left' | 'right' }) => {
+    if (overlay && typeof arg?.width === 'number') resizePanelWidth(overlay, arg.width, arg.anchor === 'left' ? 'left' : 'right')
   })
   ipcMain.on(IPC.hide, () => overlay?.hide())
   ipcMain.on(IPC.quit, () => app.quit())

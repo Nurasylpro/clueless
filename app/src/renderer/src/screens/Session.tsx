@@ -34,7 +34,7 @@ export function SessionScreen({ session, onOpenReview }: { session: SessionView;
   const ready = Boolean(session.problem) && !session.busy
 
   return (
-    <div className="flex min-h-0 flex-col">
+    <div className="session-screen flex min-h-0 flex-col">
       {session.problem && <ProblemBar problem={session.problem} />}
       {session.plan.length > 0 && <PlanList plan={session.plan} />}
       <LatestExchange session={session} onOpenReview={onOpenReview} />
@@ -154,7 +154,7 @@ function LatestExchange({ session, onOpenReview }: { session: SessionView; onOpe
   const student = showStudent ? thread[studentAt] : null
 
   return (
-    <div className="space-y-2 px-3 py-2.5">
+    <div className="exchange space-y-2 px-3 py-2.5">
       {student && student.role === 'student' && <StudentLine text={student.text} as={student.as} check={student.check} />}
       {session.busy && <BusyRow label={session.busy} />}
       {tutor && tutor.role === 'tutor' && !pending && (
@@ -208,7 +208,7 @@ function TutorCard({ turn }: { turn: TurnView }) {
           )}
         </div>
       )}
-      <div className="max-h-[300px] overflow-y-auto">
+      <div className="msg-scroll max-h-[300px] overflow-y-auto">
         <Markdown text={turn.message} />
         {turn.visual && turn.visual.frames.length > 0 && <VisualSlot visual={turn.visual} />}
       </div>

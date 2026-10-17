@@ -5,6 +5,8 @@ import type { Rect } from '../../shared/contracts'
 
 /** The window wraps the panel (plus an 8px margin for its shadow) and follows its height. */
 export const PANEL_WIDTH = 416
+const MIN_WIDTH = 320
+const MAX_WIDTH = 960
 const MARGIN = 16
 
 // macOS: a 'panel' window floats over full-screen apps and appears on every Space, and it takes
@@ -34,7 +36,7 @@ export function createOverlay(): BrowserWindow {
     title: 'Clueless',
     show: false,
     frame: false,
-    transparent: true, // transparent windows can't be resized by dragging: the panel sets the height
+    transparent: true, // transparent windows can't be resized natively: the panel's own grips resize it
     resizable: false,
     maximizable: false,
     fullscreenable: false,
@@ -67,6 +69,17 @@ export function fitPanelHeight(win: BrowserWindow, panelHeight: number): void {
   if (Math.abs(current - height) < 2) return
   const top = Math.max(work.y, Math.min(y, work.y + work.height - height)) // grow downward, never off-screen
   win.setBounds({ x, y: top, width, height })
+}
+
+/** The student dragged a side edge. `anchor` is the edge that stays put; the window stays on screen. */
+export function resizePanelWidth(win: BrowserWindow, width: number, anchor: 'left' | 'right'): void {
+  if (!Number.isFinite(width)) return
+  const b = win.getBounds()
+  const work = screen.getDisplayNearestPoint({ x: b.x, y: b.y }).workArea
+  const w = Math.round(Math.max(MIN_WIDTH, Math.min(width, MAX_WIDTH, work.width - 16)))
+  if (w === b.width) return
+  const x = anchor === 'right' ? b.x + b.width - w : b.x
+  win.setBounds({ x: Math.max(work.x, Math.min(x, work.x + work.width - w)), y: b.y, width: w, height: b.height })
 }
 
 // ---------- area selection ----------
