@@ -141,3 +141,17 @@ body.mock-desktop {
     text-shadow: 0 1px 6px rgb(0 0 0 / 0.75);
   }
 }
+
+/* Mic button while connecting */
+@keyframes mic-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(244 63 94 / 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgb(244 63 94 / 0);
+  }
+}
+.mic-pulse {
+  animation: mic-pulse 1.2s infinite;
+}

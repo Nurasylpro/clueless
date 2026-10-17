@@ -25,7 +25,15 @@ const api: CluelessApi = {
   getMemory: () => ipcRenderer.invoke(IPC.getMemory),
   rateCard: (id, rating) => ipcRenderer.invoke(IPC.rateCard, { id, rating }),
   areaDone: (rect) => ipcRenderer.send(IPC.areaDone, rect),
-  areaCancel: () => ipcRenderer.send(IPC.areaCancel)
+  areaCancel: () => ipcRenderer.send(IPC.areaCancel),
+  micAccess: () => ipcRenderer.invoke(IPC.voiceMicAccess),
+  voiceStart: (id) => ipcRenderer.send(IPC.voiceStart, id),
+  voiceAudio: (id, chunk) => ipcRenderer.send(IPC.voiceAudio, { id, chunk }),
+  voiceStop: (id) => ipcRenderer.send(IPC.voiceStop, id),
+  voiceCancel: (id) => ipcRenderer.send(IPC.voiceCancel, id),
+  onVoiceTranscript: (cb) => listen(IPC.voiceTranscript, cb),
+  onVoiceState: (cb) => listen(IPC.voiceState, cb),
+  onVoiceToggle: (cb) => listen(IPC.voiceToggle, cb)
 }
 
 contextBridge.exposeInMainWorld('clueless', api)

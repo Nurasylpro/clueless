@@ -1,5 +1,5 @@
 // Clueless main process: windows, hotkeys, screen capture and IPC around the session controller.
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, shell } from 'electron'
+import { app, BrowserWindow, globalShortcut, ipcMain, Menu, shell, systemPreferences } from 'electron'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -28,10 +28,12 @@ import { SessionController } from './session'
 import { StuckDetector } from './stuck/detector'
 import { createTransport, providerInfo } from './tutor/provider'
 import { Tutor, type ImageInput } from './tutor/tutor'
+import { VoiceManager, type SocketLike } from './voice/deepgram'
 import { createTray } from './windows/tray'
 import { createOverlay, resolveAreaSelection, selectArea, setPanelMode } from './windows/windows'
 
 const HOTKEYS = { ask: 'CommandOrControl+Shift+Space', area: 'CommandOrControl+Shift+2' }
+const VOICE_HOTKEY = 'CommandOrControl+Shift+1'
 const SMOKE = process.env.CLUELESS_SMOKE === '1'
 
 let overlay: BrowserWindow | null = null
@@ -161,6 +163,7 @@ function openScreenSettings(): void {
 
 let controller: SessionController
 let stuck: StuckDetector
+let voice: VoiceManager
 const keepAlive: unknown[] = [] // the tray icon disappears if it's garbage-collected
 
 function setup(): void {
@@ -194,6 +197,19 @@ function setup(): void {
     stuck
   })
 
+  voice = new VoiceManager({
+    apiKey: () => {
+      loadKeys() // pick up a key added since launch
+      return process.env.DEEPGRAM_API_KEY?.trim() || undefined
+    },
+    events: {
+      transcript: (t) => toUi(IPC.voiceTranscript, t),
+      state: (e) => toUi(IPC.voiceState, e)
+    },
+    // Node's built-in WebSocket (no extra package).
+    makeSocket: (url, protocols) => new WebSocket(url, protocols) as unknown as SocketLike
+  })
+
   ipcMain.handle(IPC.getStatus, () => status())
   ipcMain.handle(IPC.getSession, () => controller.current)
   ipcMain.handle(IPC.getMemory, () => store.view())
@@ -219,9 +235,27 @@ function setup(): void {
   ipcMain.on(IPC.openScreenSettings, () => openScreenSettings())
   ipcMain.on(IPC.areaDone, (_e, rect: Rect) => resolveAreaSelection(rect))
   ipcMain.on(IPC.areaCancel, () => resolveAreaSelection(null))
+  ipcMain.handle(IPC.voiceMicAccess, async () => {
+    // macOS asks the student once; Windows uses its own privacy setting and Chromium handles it.
+    if (process.platform !== 'darwin') return true
+    if (systemPreferences.getMediaAccessStatus('microphone') === 'granted') return true
+    return systemPreferences.askForMediaAccess('microphone')
+  })
+  ipcMain.on(IPC.voiceStart, (_e, id: unknown) => voice.start(id))
+  ipcMain.on(IPC.voiceAudio, (_e, arg: { id?: unknown; chunk?: unknown }) => voice.audio(arg?.id, arg?.chunk))
+  ipcMain.on(IPC.voiceStop, (_e, id: unknown) => voice.stop(id))
+  ipcMain.on(IPC.voiceCancel, (_e, id: unknown) => voice.cancel(id))
 
   overlay = createOverlay()
-  overlay.on('closed', () => (overlay = null))
+  overlay.on('closed', () => {
+    voice.cancelAll()
+    overlay = null
+  })
+  // A reload (or crash) of the UI drops its recorder: close the Deepgram side too.
+  overlay.webContents.on('did-start-navigation', (_e, _url, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) voice.cancelAll()
+  })
+  overlay.webContents.on('render-process-gone', () => voice.cancelAll())
   keepAlive.push(createTray({
     ask: () => void ask('screen'),
     selectArea: () => void ask('area'),
@@ -246,7 +280,12 @@ function setup(): void {
     const ok = globalShortcut.register(accelerator, () => void ask(name === 'area' ? 'area' : 'screen'))
     if (!ok) hotkeyErrors.push(`${accelerator} is taken by another app`)
   }
-  log(`ready. Ask: ${HOTKEYS.ask}  Select area: ${HOTKEYS.area}`)
+  const voiceOk = globalShortcut.register(VOICE_HOTKEY, () => {
+    showOverlay()
+    toUi(IPC.voiceToggle, null)
+  })
+  if (!voiceOk) hotkeyErrors.push(`${VOICE_HOTKEY} is taken by another app`)
+  log(`ready. Ask: ${HOTKEYS.ask}  Select area: ${HOTKEYS.area}  Voice: ${VOICE_HOTKEY}`)
 }
 
 // Smoke runs use their own data folder, so they don't collide with a running copy (or its memory file).
@@ -259,5 +298,8 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(setup)
   app.on('activate', () => showOverlay())
   app.on('window-all-closed', () => app.quit())
-  app.on('will-quit', () => globalShortcut.unregisterAll())
+  app.on('will-quit', () => {
+    globalShortcut.unregisterAll()
+    voice?.cancelAll()
+  })
 }

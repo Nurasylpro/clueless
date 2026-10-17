@@ -9,7 +9,8 @@ import type {
   MemoryView,
   SessionView,
   ThreadItem,
-  TurnView
+  TurnView,
+  VoiceStateEvent
 } from '../../../shared/contracts'
 import { MOCK_AFTER_RECAP, MOCK_GAPS, MOCK_PROBLEM, MOCK_RECAP, MOCK_TURNS } from './fixtures'
 
@@ -19,6 +20,7 @@ export function createMockApi(): CluelessApi {
   let view: SessionView | null = null
   let step = 0
   const listeners = new Set<(v: SessionView | null) => void>()
+  const voiceStates = new Set<(e: VoiceStateEvent) => void>()
   let cards: CardView[] = [
     { id: 'c1', subject: 'math', topic: 'integration by parts', front: 'What is the integration by parts formula?', back: '$\\int u\\,dv = uv - \\int v\\,du$', due: new Date().toISOString() },
     { id: 'c2', subject: 'coding', topic: 'Valid Sudoku', front: 'Python: make a list of 9 empty sets', back: '`[set() for _ in range(9)]`', due: new Date().toISOString() }
@@ -166,6 +168,22 @@ export function createMockApi(): CluelessApi {
       return memory()
     },
     areaDone: (rect) => console.log('[mock] area', rect),
-    areaCancel: () => console.log('[mock] area cancelled')
+    areaCancel: () => console.log('[mock] area cancelled'),
+    // Voice needs the desktop app (Deepgram runs in the main process): report that instead.
+    micAccess: async () => true,
+    voiceStart: (id) => {
+      setTimeout(() => {
+        voiceStates.forEach((cb) => cb({ id, state: 'error', message: 'Voice works in the desktop app (npm run dev).' }))
+      }, 300)
+    },
+    voiceAudio: () => {},
+    voiceStop: () => {},
+    voiceCancel: () => {},
+    onVoiceTranscript: () => () => {},
+    onVoiceState: (cb) => {
+      voiceStates.add(cb)
+      return () => voiceStates.delete(cb)
+    },
+    onVoiceToggle: () => () => {}
   }
 }
