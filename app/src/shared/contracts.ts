@@ -208,7 +208,8 @@ export const IPC = {
   voiceCancel: 'voice:cancel', // UI -> main: utterance id; drop it, no transcript
   voiceTranscript: 'voice:transcript', // main -> UI: VoiceTranscript
   voiceState: 'voice:state', // main -> UI: VoiceStateEvent
-  voiceMicAccess: 'voice:mic-access' // UI -> main (invoke): ask the OS for the microphone -> boolean
+  voiceMicAccess: 'voice:mic-access', // UI -> main (invoke): ask the OS for the microphone -> boolean
+  voiceTts: 'voice:tts' // UI -> main (invoke): TtsRequest -> TtsResult (ElevenLabs audio)
 } as const
 
 // ---------- voice ----------
@@ -226,6 +227,17 @@ export type VoiceStateEvent =
   | { id: string; state: 'listening' }
   | { id: string; state: 'closed'; reason: 'done' | 'no-speech' | 'cancelled' }
   | { id: string; state: 'error'; message: string }
+
+/** One piece of a reply to read aloud; the neighbouring text keeps the intonation natural. */
+export interface TtsRequest {
+  text: string
+  previousText?: string
+  nextText?: string
+}
+
+export type TtsResult =
+  | { ok: true; audio: ArrayBuffer; mime: string }
+  | { ok: false; reason: 'no-key' | 'error'; message: string }
 
 /** The API the preload script exposes to the UI as `window.clueless`. */
 export interface CluelessApi {
@@ -258,4 +270,5 @@ export interface CluelessApi {
   onVoiceTranscript(cb: (t: VoiceTranscript) => void): () => void
   onVoiceState(cb: (e: VoiceStateEvent) => void): () => void
   onVoiceToggle(cb: () => void): () => void
+  tts(req: TtsRequest): Promise<TtsResult>
 }

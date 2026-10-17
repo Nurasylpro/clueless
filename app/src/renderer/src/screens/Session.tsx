@@ -20,25 +20,38 @@ import {
   LockIcon,
   PlusIcon,
   RetryIcon,
-  SendIcon
+  SendIcon,
+  SpeakerIcon,
+  SpeakerOffIcon
 } from '../components/icons'
 import { Markdown, MathText, mathToHtml } from '../components/Markdown'
-import { MicButton, VoiceStrip } from '../components/MicButton'
+import { MicButton, SpeakingStrip, VoiceStrip } from '../components/MicButton'
 import { Button, cx, IconButton } from '../components/ui'
 import { VisualSlot } from '../components/VisualSlot'
-import { useVoiceInput } from '../voice/useVoiceInput'
+import { speech } from '../voice/speaker'
+import { useVoiceConversation, type VoiceConversation } from '../voice/useVoiceConversation'
 
 type ComposerMode = 'answer' | 'recall'
 
 export function SessionScreen({ session, onOpenReview }: { session: SessionView; onOpenReview: () => void }) {
   const [mode, setMode] = useState<ComposerMode>('answer')
   const ready = Boolean(session.problem) && !session.busy
+  // Voice: what you say is sent exactly like a typed answer (spoken math goes as text, so the checker
+  // and the tutor read it like a typed sentence); new replies are read aloud in voice mode.
+  const conv = useVoiceConversation({
+    session,
+    disabled: !ready,
+    onSpoken: (text) => {
+      api.send({ text, as: mode === 'recall' ? 'recall' : 'text' })
+      setMode('answer')
+    }
+  })
 
   return (
     <div className="session-screen flex min-h-0 flex-col">
       {session.problem && <ProblemBar problem={session.problem} />}
       {session.plan.length > 0 && <PlanList plan={session.plan} />}
-      <LatestExchange session={session} onOpenReview={onOpenReview} />
+      <LatestExchange session={session} onOpenReview={onOpenReview} onReadAloud={conv.readAloud} />
       {session.stuck.level === 2 && !session.busy && !session.recap && (
         <StuckBubble reason={session.stuck.reason} onRecall={() => setMode('recall')} />
       )}
@@ -47,7 +60,7 @@ export function SessionScreen({ session, onOpenReview }: { session: SessionView;
         <ErrorBox message={session.error} canRetry={Boolean(session.problem)} onDismiss={session.problem ? null : () => api.action('new')} />
       )}
       {session.problem && !session.recap && <QuickActions session={session} disabled={!ready} />}
-      {session.problem && <Composer session={session} mode={mode} setMode={setMode} disabled={!ready} />}
+      {session.problem && <Composer session={session} mode={mode} setMode={setMode} disabled={!ready} conv={conv} />}
     </div>
   )
 }
@@ -144,7 +157,15 @@ function findLastIndex<T>(list: T[], test: (item: T) => boolean): number {
 }
 
 /** Only the student's latest input and Clueless's latest reply. */
-function LatestExchange({ session, onOpenReview }: { session: SessionView; onOpenReview: () => void }) {
+function LatestExchange({
+  session,
+  onOpenReview,
+  onReadAloud
+}: {
+  session: SessionView
+  onOpenReview: () => void
+  onReadAloud: (markdown: string) => void
+}) {
   const { thread } = session
   const tutorAt = findLastIndex(thread, (t) => t.role === 'tutor')
   const studentAt = findLastIndex(thread, (t) => t.role === 'student')
@@ -160,7 +181,7 @@ function LatestExchange({ session, onOpenReview }: { session: SessionView; onOpe
       {session.busy && <BusyRow label={session.busy} />}
       {tutor && tutor.role === 'tutor' && !pending && (
         <div className={cx('transition-opacity', session.busy && 'opacity-40')}>
-          <TutorCard turn={tutor.turn} />
+          <TutorCard turn={tutor.turn} onReadAloud={() => onReadAloud(tutor.turn.message)} />
           {session.recap && session.recap.afterItemId === tutor.id && (
             <RecapCard recap={session.recap} onOpenReview={onOpenReview} />
           )}
@@ -184,7 +205,7 @@ const GAP_LABEL = {
   careless_slip: 'Careless slip'
 } as const
 
-function TutorCard({ turn }: { turn: TurnView }) {
+function TutorCard({ turn, onReadAloud }: { turn: TurnView; onReadAloud: () => void }) {
   const label = KIND_LABEL[turn.kind]
   const tone =
     turn.kind === 'recall_card'
@@ -196,7 +217,14 @@ function TutorCard({ turn }: { turn: TurnView }) {
           : 'border-zinc-900/10 bg-white/70 dark:border-white/10 dark:bg-black/35'
 
   return (
-    <div className={cx('rounded-xl border px-3 py-2 text-zinc-800 dark:text-zinc-100', tone)}>
+    <div className={cx('group relative rounded-xl border py-2 pl-3 pr-7 text-zinc-800 dark:text-zinc-100', tone)}>
+      <IconButton
+        title="Read aloud"
+        onClick={onReadAloud}
+        className="absolute right-1 top-1 h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+      >
+        <SpeakerIcon size={13} />
+      </IconButton>
       {(label || turn.hintLevel > 0 || turn.gap || turn.verdict !== 'none') && (
         <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[10.5px]">
           <Verdict verdict={turn.verdict} />
@@ -408,12 +436,14 @@ function Composer({
   session,
   mode,
   setMode,
-  disabled
+  disabled,
+  conv
 }: {
   session: SessionView
   mode: ComposerMode
   setMode: (m: ComposerMode) => void
   disabled: boolean
+  conv: VoiceConversation
 }) {
   const [text, setText] = useState('')
   const input = useRef<HTMLTextAreaElement>(null)
@@ -438,39 +468,6 @@ function Composer({
     setText('')
     setMode('answer')
   }
-
-  // Voice: the final transcript goes through the same send as typing (spoken math is sent as text,
-  // so the checker and the tutor read it like a typed sentence). Whatever was typed stays in the box.
-  const [voiceSent, setVoiceSent] = useState(false)
-  const sawBusy = useRef(false)
-  const voice = useVoiceInput((spoken) => {
-    api.send({ text: spoken, as: mode === 'recall' ? 'recall' : 'text' })
-    setMode('answer')
-    sawBusy.current = false
-    setVoiceSent(true)
-  })
-  // "Waiting for Clueless" lasts until the tutor's reply (or an error) arrives.
-  useEffect(() => {
-    if (!voiceSent) return
-    if (disabled) sawBusy.current = true
-    else if (sawBusy.current) setVoiceSent(false)
-    const t = setTimeout(() => !sawBusy.current && setVoiceSent(false), 3000) // never got busy
-    return () => clearTimeout(t)
-  }, [voiceSent, disabled])
-  // The voice hotkey (Ctrl/Cmd+Shift+1) starts or stops talking.
-  const voiceRef = useRef(voice)
-  voiceRef.current = voice
-  useEffect(
-    () =>
-      api.onVoiceToggle(() => {
-        const v = voiceRef.current
-        if (v.state === 'starting' || v.state === 'listening') v.stop()
-        else if (!disabledRef.current && v.state !== 'finishing') void v.start()
-      }),
-    []
-  )
-  const disabledRef = useRef(disabled)
-  disabledRef.current = disabled
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
     // Code: Enter is a newline, Cmd/Ctrl+Enter sends. Everything else: Enter sends.
@@ -518,12 +515,28 @@ function Composer({
           </button>
         ))}
         {mode === 'recall' && (
-          <IconButton title="Back to answering" onClick={() => setMode('answer')} className="ml-auto h-5 w-5">
+          <IconButton title="Back to answering" onClick={() => setMode('answer')} className="h-5 w-5">
             <BackIcon size={12} />
           </IconButton>
         )}
+        <button
+          type="button"
+          onClick={() => conv.setEnabled(!conv.enabled)}
+          aria-pressed={conv.enabled}
+          title={conv.enabled ? 'Voice on: replies are read aloud. Click to turn off' : 'Voice off. Click to have replies read aloud'}
+          className={cx(
+            'no-drag ml-auto flex items-center gap-1 rounded-full px-2 py-0.5 transition-colors',
+            conv.enabled
+              ? 'bg-claude-100 text-claude-800 dark:bg-claude-500/15 dark:text-claude-400'
+              : 'text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-white/10'
+          )}
+        >
+          {conv.enabled ? <SpeakerIcon size={11} /> : <SpeakerOffIcon size={11} />}
+          Voice {conv.enabled ? 'on' : 'off'}
+        </button>
       </div>
-      <VoiceStrip voice={voice} onDismiss={voice.cancel} />
+      <SpeakingStrip conv={conv} onStop={speech.stop} onPause={speech.pause} onResume={speech.resume} />
+      <VoiceStrip voice={conv.input} onDismiss={conv.input.cancel} />
       <div className="flex items-end gap-1.5 rounded-xl border border-zinc-900/10 bg-white/70 px-2 py-1 focus-within:border-claude-500 dark:border-white/15 dark:bg-black/35">
 
         <textarea
@@ -539,7 +552,7 @@ function Composer({
             as === 'code' && 'font-mono text-[12.5px]'
           )}
         />
-        <MicButton voice={voice} processing={voiceSent} disabled={disabled} />
+        <MicButton conv={conv} disabled={disabled} />
         <IconButton
           title="Send"
           onClick={() => submit()}

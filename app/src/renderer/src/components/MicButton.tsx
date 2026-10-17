@@ -1,20 +1,15 @@
 // The mic button in the answer box. Click to talk; it stops on its own when you pause, or click
 // again to stop now. States: idle, connecting, listening (ring follows your voice), finishing,
-// waiting for the tutor, error.
+// waiting for the tutor, Clueless speaking (click to interrupt and talk), error.
+import type { VoiceConversation } from '../voice/useVoiceConversation'
 import type { VoiceInput } from '../voice/useVoiceInput'
-import { MicIcon } from './icons'
+import { MicIcon, PauseIcon, PlayIcon, SpeakerIcon, StopIcon } from './icons'
 import { cx, IconButton } from './ui'
 
-export function MicButton({
-  voice,
-  processing,
-  disabled
-}: {
-  voice: VoiceInput
-  processing: boolean // the transcript was sent and the tutor is thinking
-  disabled?: boolean
-}) {
-  const { state, level } = voice
+export function MicButton({ conv, disabled }: { conv: VoiceConversation; disabled?: boolean }) {
+  const { state, level } = conv.input
+  const { processing } = conv
+  const speaking = conv.speech.state !== 'idle'
   const active = state === 'starting' || state === 'listening'
   const title =
     state === 'starting'
@@ -25,9 +20,11 @@ export function MicButton({
           ? 'Finishing…'
           : processing
             ? 'Sent. Waiting for Clueless…'
-            : state === 'error'
-              ? `${voice.notice ?? 'Voice error'} Click to try again.`
-              : 'Talk instead of typing (Ctrl/⌘+Shift+1)'
+            : speaking
+              ? 'Clueless is talking. Click to stop it and answer'
+              : state === 'error'
+                ? `${conv.input.notice ?? 'Voice error'} Click to try again.`
+                : 'Talk instead of typing (Ctrl/⌘+Shift+1)'
 
   return (
     <IconButton
@@ -35,13 +32,13 @@ export function MicButton({
       aria-label={title}
       aria-pressed={active}
       disabled={(disabled && !active) || state === 'finishing'}
-      onClick={() => (active ? voice.stop() : void voice.start())}
+      onClick={conv.toggleMic}
       className={cx(
         'disabled:cursor-not-allowed disabled:opacity-40',
         state === 'listening' && 'bg-rose-500 text-white hover:bg-rose-500 hover:text-white dark:text-white dark:hover:bg-rose-500',
         state === 'starting' && 'bg-rose-500/20 text-rose-600 dark:text-rose-300',
         state === 'error' && 'text-rose-500 dark:text-rose-400',
-        (state === 'finishing' || processing) && 'text-claude-500 dark:text-claude-400'
+        (state === 'finishing' || processing || speaking) && 'text-claude-500 dark:text-claude-400'
       )}
     >
       {state === 'listening' && (
@@ -59,10 +56,43 @@ export function MicButton({
           <span className="busy-dot h-1 w-1 rounded-full bg-current" />
           <span className="busy-dot h-1 w-1 rounded-full bg-current" />
         </span>
+      ) : speaking && !active ? (
+        <SpeakerIcon size={16} className={conv.speech.state === 'speaking' ? 'animate-pulse' : undefined} />
       ) : (
         <MicIcon size={16} />
       )}
     </IconButton>
+  )
+}
+
+/** While Clueless reads a reply aloud: pause/resume and stop. Also shows playback errors. */
+export function SpeakingStrip({ conv, onStop, onPause, onResume }: { conv: VoiceConversation; onStop: () => void; onPause: () => void; onResume: () => void }) {
+  const { state, error } = conv.speech
+  if (state === 'idle') {
+    if (!error) return null
+    return (
+      <div className="mb-1.5 rounded-lg bg-zinc-100 px-2.5 py-1.5 text-xs text-zinc-600 dark:bg-white/10 dark:text-zinc-300">{error}</div>
+    )
+  }
+  return (
+    <div className="mb-1.5 flex items-center gap-1.5 rounded-lg border border-claude-200 bg-claude-50/70 px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-claude-700 dark:border-claude-500/30 dark:bg-claude-500/10 dark:text-claude-400">
+      <SpeakerIcon size={13} className={state === 'speaking' ? 'animate-pulse' : undefined} />
+      {state === 'speaking' ? 'Speaking…' : 'Paused'}
+      <span className="ml-auto flex items-center gap-0.5 normal-case tracking-normal">
+        {state === 'speaking' ? (
+          <IconButton title="Pause" onClick={onPause} className="h-6 w-6 text-claude-700 dark:text-claude-400">
+            <PauseIcon size={13} />
+          </IconButton>
+        ) : (
+          <IconButton title="Resume" onClick={onResume} className="h-6 w-6 text-claude-700 dark:text-claude-400">
+            <PlayIcon size={13} />
+          </IconButton>
+        )}
+        <IconButton title="Stop speaking" onClick={onStop} className="h-6 w-auto gap-1 px-1.5 text-claude-700 dark:text-claude-400">
+          <StopIcon size={12} /> Stop
+        </IconButton>
+      </span>
+    </div>
   )
 }
 

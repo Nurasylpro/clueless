@@ -35,7 +35,8 @@ const api: CluelessApi = {
   voiceCancel: (id) => ipcRenderer.send(IPC.voiceCancel, id),
   onVoiceTranscript: (cb) => listen(IPC.voiceTranscript, cb),
   onVoiceState: (cb) => listen(IPC.voiceState, cb),
-  onVoiceToggle: (cb) => listen(IPC.voiceToggle, cb)
+  onVoiceToggle: (cb) => listen(IPC.voiceToggle, cb),
+  tts: (req) => ipcRenderer.invoke(IPC.voiceTts, req)
 }
 
 contextBridge.exposeInMainWorld('clueless', api)
