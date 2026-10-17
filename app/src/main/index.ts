@@ -10,8 +10,7 @@ import {
   type Rect,
   type SessionView,
   type Subject,
-  type UserAction,
-  type WindowMode
+  type UserAction
 } from '../shared/contracts'
 import {
   activeDisplay,
@@ -29,13 +28,12 @@ import { StuckDetector } from './stuck/detector'
 import { createTransport, providerInfo } from './tutor/provider'
 import { Tutor, type ImageInput } from './tutor/tutor'
 import { createTray } from './windows/tray'
-import { createOverlay, resolveAreaSelection, selectArea, setPanelMode } from './windows/windows'
+import { createOverlay, fitPanelHeight, resolveAreaSelection, selectArea } from './windows/windows'
 
 const HOTKEYS = { ask: 'CommandOrControl+Shift+Space', area: 'CommandOrControl+Shift+2' }
 const SMOKE = process.env.CLUELESS_SMOKE === '1'
 
 let overlay: BrowserWindow | null = null
-let panelMode: WindowMode = 'expanded'
 let capturing = false
 const hotkeyErrors: string[] = []
 
@@ -74,7 +72,6 @@ function makeTutor(): Tutor | null {
 
 function showOverlay(): void {
   if (!overlay) return
-  if (panelMode === 'compact') setMode('expanded')
   // No app.focus() here: on macOS the panel takes keyboard focus without activating the app,
   // so a full-screen browser stays in its own Space instead of being switched away from.
   overlay.show()
@@ -84,11 +81,6 @@ function showOverlay(): void {
 function toggleOverlay(): void {
   if (overlay?.isVisible()) overlay.hide()
   else showOverlay()
-}
-
-function setMode(mode: WindowMode): void {
-  panelMode = mode
-  if (overlay) setPanelMode(overlay, mode)
 }
 
 /** Hide the panel (without losing its place) while the screen is captured. */
@@ -213,7 +205,11 @@ function setup(): void {
   })
   ipcMain.on(IPC.action, (_e, action: UserAction) => void controller.action(action))
   ipcMain.on(IPC.setSubject, (_e, subject: Subject) => controller.setSubject(subject))
-  ipcMain.on(IPC.windowMode, (_e, mode: WindowMode) => setMode(mode === 'compact' ? 'compact' : 'expanded'))
+  // Compact mode needs nothing here: the panel shrinks to its header and fitHeight follows it.
+  ipcMain.on(IPC.windowMode, () => {})
+  ipcMain.on(IPC.fitHeight, (_e, px: number) => {
+    if (overlay && typeof px === 'number') fitPanelHeight(overlay, px)
+  })
   ipcMain.on(IPC.hide, () => overlay?.hide())
   ipcMain.on(IPC.quit, () => app.quit())
   ipcMain.on(IPC.openScreenSettings, () => openScreenSettings())
@@ -241,7 +237,15 @@ function setup(): void {
     return
   }
 
-  overlay.once('ready-to-show', () => overlay?.show())
+  // Launching while a full-screen app is in front: the window is created before macOS has finished
+  // turning Clueless into a menu-bar app, so it can land on the desktop Space only. Re-join every
+  // Space (full-screen ones included) once that's settled, then show it the same way the hotkey does.
+  overlay.once('ready-to-show', () =>
+    setTimeout(() => {
+      overlay?.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
+      showOverlay()
+    }, 800)
+  )
   for (const [name, accelerator] of Object.entries(HOTKEYS)) {
     const ok = globalShortcut.register(accelerator, () => void ask(name === 'area' ? 'area' : 'screen'))
     if (!ok) hotkeyErrors.push(`${accelerator} is taken by another app`)

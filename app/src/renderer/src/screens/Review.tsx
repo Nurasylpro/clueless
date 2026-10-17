@@ -9,7 +9,7 @@ import { Button, cx, IconButton } from '../components/ui'
 const GAP_STYLE: Record<GapRecord['type'], [string, string]> = {
   recall_slip: ['Recall', 'bg-sky-100 text-sky-800 dark:bg-sky-500/15 dark:text-sky-300'],
   concept_gap: ['Concept', 'bg-violet-100 text-violet-800 dark:bg-violet-500/15 dark:text-violet-300'],
-  strategy_gap: ['Strategy', 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300'],
+  strategy_gap: ['Strategy', 'bg-claude-100 text-claude-800 dark:bg-claude-600/15 dark:text-claude-400'],
   careless_slip: ['Careless', 'bg-rose-100 text-rose-800 dark:bg-rose-500/15 dark:text-rose-300']
 }
 
@@ -31,7 +31,7 @@ export function ReviewScreen({ onBack, onChange }: { onBack: () => void; onChang
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="flex flex-col">
       <div className="flex items-center gap-2 border-b border-zinc-900/10 px-3 py-2 dark:border-white/10">
         <IconButton title="Back" onClick={onBack}>
           <BackIcon size={15} />
@@ -52,7 +52,7 @@ export function ReviewScreen({ onBack, onChange }: { onBack: () => void; onChang
           </button>
         ))}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+      <div className="max-h-[420px] overflow-y-auto px-3 py-3">
         {!memory ? null : tab === 'cards' ? <Cards memory={memory} onRate={rate} /> : <GapMap gaps={memory.gaps} />}
       </div>
     </div>
@@ -136,7 +136,7 @@ function GapMap({ gaps }: { gaps: GapRecord[] }) {
                   {g.topic}
                 </span>
                 <span className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-zinc-100 dark:bg-white/10">
-                  <span className="block h-full rounded-full bg-amber-400" style={{ width: `${(g.timesSeen / max) * 100}%` }} />
+                  <span className="block h-full rounded-full bg-claude-500" style={{ width: `${(g.timesSeen / max) * 100}%` }} />
                 </span>
                 <span className="w-6 shrink-0 text-right text-xs text-zinc-500">×{g.timesSeen}</span>
               </li>

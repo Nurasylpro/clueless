@@ -188,6 +188,7 @@ export const IPC = {
   action: 'user:action', // UserAction
   setSubject: 'user:subject', // Subject
   windowMode: 'window:mode', // WindowMode
+  fitHeight: 'window:fit-height', // number: the panel's height in px; the window follows it
   hide: 'window:hide',
   quit: 'app:quit',
   openScreenSettings: 'app:open-screen-settings',
@@ -216,6 +217,7 @@ export interface CluelessApi {
   action(action: UserAction): void
   setSubject(subject: Subject): void
   setWindowMode(mode: WindowMode): void
+  fitHeight(px: number): void
   hide(): void
   quit(): void
   openScreenSettings(): void

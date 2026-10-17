@@ -1,12 +1,11 @@
 // The floating overlay panel and the full-screen "select an area" window.
 import { app, BrowserWindow, screen, shell, type Display } from 'electron'
 import { join } from 'node:path'
-import type { Rect, WindowMode } from '../../shared/contracts'
+import type { Rect } from '../../shared/contracts'
 
-export const PANEL_SIZE: Record<WindowMode, { width: number; height: number }> = {
-  expanded: { width: 440, height: 720 },
-  compact: { width: 440, height: 84 }
-}
+/** The window wraps the panel (plus an 8px margin for its shadow) and follows its height. */
+export const PANEL_WIDTH = 416
+const MARGIN = 16
 
 // macOS: a 'panel' window floats over full-screen apps and appears on every Space, and it takes
 // keyboard focus without activating the app, so a full-screen browser isn't switched away from.
@@ -27,16 +26,15 @@ export function loadRenderer(win: BrowserWindow, hash = ''): void {
 
 export function createOverlay(): BrowserWindow {
   const work = screen.getPrimaryDisplay().workArea
-  const { width, height } = PANEL_SIZE.expanded
   const win = new BrowserWindow({
-    width,
-    height: Math.min(height, work.height - 32),
-    x: work.x + work.width - width - 16,
+    width: PANEL_WIDTH,
+    height: 180, // the panel reports its real height right after it renders
+    x: work.x + work.width - PANEL_WIDTH - 16,
     y: work.y + 16,
     title: 'Clueless',
     show: false,
     frame: false,
-    transparent: true, // transparent windows can't be resized by dragging: we switch between fixed sizes
+    transparent: true, // transparent windows can't be resized by dragging: the panel sets the height
     resizable: false,
     maximizable: false,
     fullscreenable: false,
@@ -59,11 +57,16 @@ export function createOverlay(): BrowserWindow {
   return win
 }
 
-export function setPanelMode(win: BrowserWindow, mode: WindowMode): void {
-  const { width, height } = PANEL_SIZE[mode]
+/** Make the window exactly as tall as the panel, keeping it on screen. */
+export function fitPanelHeight(win: BrowserWindow, panelHeight: number): void {
+  if (!Number.isFinite(panelHeight)) return
   const [x, y] = win.getPosition()
   const work = screen.getDisplayNearestPoint({ x, y }).workArea
-  win.setBounds({ x, y, width, height: Math.min(height, work.height - 32) })
+  const height = Math.max(48, Math.min(Math.round(panelHeight) + MARGIN, work.height - 16))
+  const [width, current] = win.getSize()
+  if (Math.abs(current - height) < 2) return
+  const top = Math.max(work.y, Math.min(y, work.y + work.height - height)) // grow downward, never off-screen
+  win.setBounds({ x, y: top, width, height })
 }
 
 // ---------- area selection ----------

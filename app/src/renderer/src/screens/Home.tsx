@@ -27,14 +27,14 @@ export function Header({
   onOpenReview: () => void
 }) {
   return (
-    <header className="drag flex h-12 shrink-0 items-center gap-2 border-b border-zinc-900/10 px-3 dark:border-white/10">
-      <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-amber-400 text-zinc-950">
-        <Logo size={17} />
+    <header className="drag flex h-10 shrink-0 items-center gap-2 border-b border-zinc-900/10 px-2.5 dark:border-white/10">
+      <div className="flex h-6 w-6 items-center justify-center rounded-md bg-claude-500 text-white">
+        <Logo size={15} />
       </div>
-      <span className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">Clueless</span>
+      <span className="text-[13px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">Clueless</span>
       {stuck && stuck.level > 0 && (
         <span
-          className={cx('glow-dot h-2.5 w-2.5 rounded-full bg-amber-400', stuck.level === 2 && 'bg-amber-500')}
+          className={cx('glow-dot h-2.5 w-2.5 rounded-full bg-claude-500', stuck.level === 2 && 'bg-claude-600')}
           title={stuck.reason ?? 'Stuck?'}
         />
       )}
@@ -50,7 +50,7 @@ export function Header({
         <IconButton title="Flashcards and gap map" onClick={onOpenReview}>
           <CardsIcon size={15} />
           {dueCards > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-amber-400 px-0.5 text-[9px] font-bold text-zinc-950">
+            <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-claude-500 px-0.5 text-[9px] font-bold text-white">
               {dueCards}
             </span>
           )}
@@ -75,7 +75,7 @@ export function Banners({ status }: { status: AppStatus | null }) {
   return (
     <>
       {!status.provider && (
-        <div className="border-b border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+        <div className="border-b border-claude-200 bg-claude-50/80 px-3 py-2 text-xs text-claude-900 dark:border-claude-600/30 dark:bg-claude-600/10 dark:text-claude-200">
           <span className="font-semibold">Connect Claude.</span> In{' '}
           <code className="selectable break-all font-mono">{status.envFile}</code> set{' '}
           <span className="font-semibold">Bedrock:</span> <code className="font-mono">AWS_REGION</code> and{' '}
@@ -84,7 +84,7 @@ export function Banners({ status }: { status: AppStatus | null }) {
         </div>
       )}
       {screenBlocked && (
-        <div className="flex items-center gap-2 border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+        <div className="flex items-center gap-2 border-b border-claude-200 bg-claude-50 px-3 py-2 text-xs text-claude-900 dark:border-claude-600/30 dark:bg-claude-600/10 dark:text-claude-200">
           <span className="flex-1">
             <span className="font-semibold">Clueless can't see your screen.</span> Allow Screen Recording, then restart Clueless.
           </span>
@@ -106,46 +106,38 @@ export function EmptyState({ status }: { status: AppStatus | null }) {
   const [text, setText] = useState('')
   const askKey = hotkeyLabel(status?.hotkeys.ask ?? 'CommandOrControl+Shift+Space', status?.platform)
   const areaKey = hotkeyLabel(status?.hotkeys.area ?? 'CommandOrControl+Shift+2', status?.platform)
+  const start = (): void => {
+    if (text.trim()) api.askText(text.trim())
+  }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col justify-center gap-6 overflow-y-auto px-6 py-6">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">Stuck on something?</h1>
-        <p className="mt-1.5 text-sm leading-relaxed text-zinc-500 dark:text-zinc-400">
-          Press <Kbd>{askKey}</Kbd> on any problem: code, math, physics. Clueless reads your screen and gives you
-          clues, not answers.
-        </p>
-      </div>
-      <div className="grid gap-2">
-        <Button variant="primary" className="h-10" onClick={() => api.ask('screen')}>
-          <ScanIcon size={16} /> Read my screen
+    <div className="space-y-2.5 px-3 py-3">
+      <p className="text-[12.5px] leading-relaxed text-zinc-600 dark:text-zinc-300">
+        Stuck? Press <Kbd>{askKey}</Kbd> on any problem. You get clues, not answers.
+      </p>
+      <div className="grid grid-cols-2 gap-1.5">
+        <Button variant="primary" className="h-8 text-[12.5px]" onClick={() => api.ask('screen')}>
+          <ScanIcon size={14} /> Read my screen
         </Button>
-        <Button className="h-10" onClick={() => api.ask('area')}>
-          <CropIcon size={15} /> Select just the problem <Kbd>{areaKey}</Kbd>
+        <Button className="h-8 text-[12.5px]" onClick={() => api.ask('area')} title={`Select just the problem (${areaKey})`}>
+          <CropIcon size={13} /> Select area
         </Button>
       </div>
-      <form
-        className="grid gap-2"
-        onSubmit={(e) => {
-          e.preventDefault()
-          if (text.trim()) api.askText(text.trim())
-        }}
-      >
-        <label className="text-xs text-zinc-500 dark:text-zinc-400">…or paste the problem</label>
+      <div className="flex items-end gap-1.5 rounded-xl border border-zinc-900/10 bg-white/70 px-2 py-1 focus-within:border-claude-500 dark:border-white/15 dark:bg-black/35">
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
-          rows={3}
-          placeholder="e.g. A 5 kg block slides down a frictionless 30° ramp. Find its acceleration."
-          className="no-drag resize-none rounded-xl border border-zinc-900/10 bg-white/70 px-3 py-2 text-[13.5px] text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-amber-400 dark:border-white/15 dark:bg-black/35 dark:text-zinc-50"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              start()
+            }
+          }}
+          rows={1}
+          placeholder="…or paste a problem and press Enter"
+          className="no-drag min-h-[1.75rem] flex-1 resize-none bg-transparent py-0.5 text-[13px] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-50"
         />
-        <Button type="submit" disabled={!text.trim()}>
-          Start with this problem
-        </Button>
-      </form>
-      <p className="text-center text-[11px] text-zinc-400">
-        Clueless shows up on screen share. Nothing to hide.
-      </p>
+      </div>
     </div>
   )
 }
