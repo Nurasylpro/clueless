@@ -204,7 +204,7 @@ Accounts and login, cloud sync, teacher dashboard, mobile, Linux.
 - **The hidden solution** stays in the main process. It is never sent to the UI.
 - **Stuck detection** runs locally and makes no AI calls.
 
-### 7.1 Calls to Claude (model `claude-opus-5-5`)
+### 7.1 Calls to Claude (Opus 5.5: `anthropic.claude-opus-5-5` on Bedrock, `claude-opus-5-5` on the Claude API)
 
 | Call | When | Input | Output | Effort |
 |---|---|---|---|---|
@@ -214,9 +214,10 @@ Accounts and login, cloud sync, teacher dashboard, mobile, Linux.
 | `recap` | Problem solved or closed | The session | `Recap` | `low` |
 
 Tips:
-- **Structured outputs** (a JSON schema) guarantee the reply always matches our types.
-- **Prompt caching:** put the system prompt, the pack and the problem screenshot first and mark them
-  for caching. The changing conversation goes after them, so follow-up turns are faster and cheaper.
+- **Reply format:**
+  - On the Claude API, **structured outputs** (a JSON schema) guarantee the reply matches our types.
+  - **Claude in Amazon Bedrock has no structured outputs**, so there Claude answers by calling a `reply` tool whose input schema is the same JSON schema. The app validates it and asks once more if it doesn't match.
+- **Prompt caching:** explicit cache breakpoints (these work on both providers): one on the system prompt, one on the newest user message. Follow-up turns re-read the screenshot from cache.
 - **Shrink screenshots** to about 1280 px wide (JPEG) before sending.
 - **Latency target: under 3 seconds per turn.** If it's still slow, try fast mode, which costs 2×.
 

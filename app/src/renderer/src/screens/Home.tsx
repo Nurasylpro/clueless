@@ -74,11 +74,13 @@ export function Banners({ status }: { status: AppStatus | null }) {
   const screenBlocked = status.platform === 'darwin' && (status.screenAccess === 'denied' || status.screenAccess === 'restricted')
   return (
     <>
-      {!status.hasAnthropicKey && (
-        <div className="border-b border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-          <span className="font-semibold">Add your Claude API key.</span> Put{' '}
-          <code className="font-mono">ANTHROPIC_API_KEY=…</code> in{' '}
-          <code className="selectable break-all font-mono">{status.envFile}</code>, then press Ask. No restart needed.
+      {!status.provider && (
+        <div className="border-b border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          <span className="font-semibold">Connect Claude.</span> In{' '}
+          <code className="selectable break-all font-mono">{status.envFile}</code> set{' '}
+          <span className="font-semibold">Bedrock:</span> <code className="font-mono">AWS_REGION</code> and{' '}
+          <code className="font-mono">AWS_BEARER_TOKEN_BEDROCK</code> (or <code className="font-mono">AWS_PROFILE</code> / access
+          keys), <span className="font-semibold">or</span> <code className="font-mono">ANTHROPIC_API_KEY</code>. Then press Ask.
         </div>
       )}
       {screenBlocked && (

@@ -4,20 +4,22 @@
 //   npm run try -- --image path/to/screenshot.png
 //
 // Then type answers. Commands: /hint  /next  /reveal  /recap  /quit   (add --debug to see the hidden solution)
-import Anthropic from '@anthropic-ai/sdk'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createInterface } from 'node:readline/promises'
 import type { AnswerCheck, TutorReplyT } from '../src/shared/contracts'
 import { checkAnswer } from '../src/main/checker/check'
 import { loadEnvFiles } from '../src/main/env'
+import { createTransport } from '../src/main/tutor/provider'
 import { Tutor, type ImageInput, type Tag } from '../src/main/tutor/tutor'
 
 loadEnvFiles([join(process.cwd(), '.env')])
-if (!process.env.ANTHROPIC_API_KEY) {
-  console.error('No ANTHROPIC_API_KEY. Copy .env.example to .env and add your key.')
+const transport = createTransport()
+if (!transport) {
+  console.error('No Claude credentials. Copy .env.example to .env and fill in the Bedrock (AWS) or ANTHROPIC_API_KEY lines.')
   process.exit(1)
 }
+console.log(`Using ${transport.provider === 'bedrock' ? `Amazon Bedrock (${transport.region})` : 'the Claude API'} · ${transport.model}`)
 
 const args = process.argv.slice(2)
 const debug = args.includes('--debug')
@@ -27,13 +29,13 @@ if (imageAt >= 0) {
   const path = args[imageAt + 1]
   image = { data: readFileSync(path).toString('base64'), mediaType: path.endsWith('.png') ? 'image/png' : 'image/jpeg' }
 }
-const text = args.filter((a, i) => !a.startsWith('--') && i !== imageAt + 1).join(' ').trim() || undefined
+const text = args.filter((a, i) => !a.startsWith("--") && (imageAt < 0 || i !== imageAt + 1)).join(' ').trim() || undefined
 if (!image && !text) {
   console.error('Give a problem as text, or --image path/to/screenshot.png')
   process.exit(1)
 }
 
-const tutor = new Tutor(new Anthropic(), process.env.CLUELESS_MODEL || undefined, (line) => console.log(`  (${line})`))
+const tutor = new Tutor(transport, (line) => console.log(`  (${line})`))
 let pendingCheck: AnswerCheck | null = null
 
 function show(reply: TutorReplyT): void {
@@ -60,7 +62,12 @@ function show(reply: TutorReplyT): void {
 
 const COMMANDS: Record<string, Tag> = { '/hint': 'HINT', '/next': 'WHAT NEXT', '/reveal': 'REVEAL', '/recap': 'RECAP' }
 
-show(await tutor.start({ image, text }))
+try {
+  show(await tutor.start({ image, text }))
+} catch (err) {
+  console.error(`error: ${(err as Error).message}`)
+  process.exit(1)
+}
 const rl = createInterface({ input: process.stdin, output: process.stdout })
 for (;;) {
   const line = (await rl.question('\nyou> ')).trim()

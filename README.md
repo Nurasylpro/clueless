@@ -33,19 +33,30 @@ Docs: [SPEC.md](SPEC.md) has the idea and specs. [BUILD_PLAN.md](BUILD_PLAN.md) 
 
 ## Run it
 
-You need [Node.js](https://nodejs.org) (current LTS) and a Claude API key.
+You need [Node.js](https://nodejs.org) (current LTS) and access to Claude through **Amazon Bedrock** (or a Claude API key).
 
 ```bash
 cd app
 npm install
-cp .env.example .env      # then put your ANTHROPIC_API_KEY in .env
+cp .env.example .env      # then fill in the Bedrock lines (or ANTHROPIC_API_KEY)
+npm run try -- "Integrate x^2 e^x dx"     # checks your credentials in the terminal
 npm run dev
 ```
 
-Press **Ctrl/Cmd+Shift+Space** on any problem, or **Ctrl/Cmd+Shift+2** to select just the problem.
+**Bedrock setup** (in `app/.env`):
+- `AWS_REGION`: for example `us-east-1`
+- Sign in with **one** of:
+  - `AWS_BEARER_TOKEN_BEDROCK`: a Bedrock API key from AWS console → Amazon Bedrock → API keys
+  - `AWS_PROFILE`: after `aws configure sso`
+  - access keys
+- The default model is `anthropic.claude-opus-5-5`. If your account doesn't have access to it, set `CLUELESS_MODEL=anthropic.claude-opus-4-8`.
 
-**macOS:** the first time, allow **Screen Recording** in System Settings → Privacy & Security, for the
-app you run it from (Terminal, VS Code…). Then restart it.
+Press **Ctrl/Cmd+Shift+Space** on any problem, or **Ctrl/Cmd+Shift+2** to select just the problem. It also
+works over **full-screen apps** (a full-screen browser, for example).
+
+**macOS:**
+- Clueless lives in the **menu bar** (magnifier icon), not the dock. Use that icon to show it, ask, or quit.
+- The first time, allow **Screen Recording** in System Settings → Privacy & Security, for the app you run it from (Terminal, VS Code…). Then restart it.
 
 | Command | What it does |
 |---|---|
@@ -74,7 +85,9 @@ app/src/
   renderer/    React UI (Tailwind) · mock/ = fake data for `npm run ui`
 ```
 
-Built with Electron, React, TypeScript, Tailwind, Claude Opus 5.5 (structured outputs, prompt caching), math.js, KaTeX and ts-fsrs.
+Built with Electron, React, TypeScript, Tailwind, Claude Opus 5.5 on Amazon Bedrock or the Claude API (prompt caching), math.js, KaTeX and ts-fsrs.
+
+On Bedrock, Claude replies through a `reply` tool shaped like the schema, because Claude in Amazon Bedrock has no structured outputs. The app validates each reply and asks once more if it doesn't fit. On the Claude API it uses structured outputs. See `app/src/main/tutor/provider.ts`.
 
 ## Team
 

@@ -17,6 +17,7 @@
     "dist:win": "electron-vite build && electron-builder --win"
   },
   "dependencies": {
+    "@anthropic-ai/bedrock-sdk": "^0.35.0",
     "@anthropic-ai/sdk": "^0.135.0",
     "mathjs": "^15.2.0",
     "ts-fsrs": "^5.4.2",

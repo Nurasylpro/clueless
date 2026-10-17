@@ -8,6 +8,10 @@
 - [x] Hotkeys: **Ctrl/Cmd+Shift+Space** reads the screen, **Ctrl/Cmd+Shift+2** selects an area
 - [x] Screen capture: the screen under the mouse, with the panel hidden during capture; area selection with display-scaling handled
 - [x] macOS Screen Recording check, with a button to open Settings
+- [x] Claude through **Amazon Bedrock** or the Claude API:
+  - Bedrock replies through a `reply` tool, validated, with one retry
+  - client-side refusal fallback on Bedrock, server-side on the Claude API
+- [x] Works over **full-screen apps**: a macOS panel window, a menu-bar icon instead of the dock, and above F11 browsers on Windows
 - [x] Tutor brain (Claude Opus 5.5):
   - structured replies (only 3 union fields, under the 16 limit)
   - prompt caching, effort `medium` on the first turn and `low` after
@@ -28,14 +32,17 @@
   - glass transparency button (glass / clear / solid)
 - [x] Browser mock mode (`npm run ui`) with a scripted Valid Sudoku session
 - [x] Terminal tutor (`npm run try`)
-- [x] 27 unit tests, typecheck, build, smoke test of the real app and the packaged macOS app
+- [x] 33 unit tests, typecheck, build, smoke test of the real app and the packaged macOS app
 
 ## Ali (you), before the demo
 
-- [ ] Get a Claude API key at https://console.anthropic.com. Add credits, or ask the organizers about sponsor credits.
-- [ ] `cd app && npm install && cp .env.example .env`, then put the key in `.env`
-- [ ] `npm run try -- "Integrate x^2 e^x dx"` to check the key works and see the tutor talk
+- [ ] Get Bedrock access:
+  - In the AWS console → Amazon Bedrock, check you have access to Claude Opus 5.5 (otherwise use Opus 4.8, which every Bedrock account has).
+  - Make a **Bedrock API key** (Bedrock → API keys), or use an AWS profile.
+- [ ] `cd app && npm install && cp .env.example .env`, then fill in `AWS_REGION` and `AWS_BEARER_TOKEN_BEDROCK` (or `AWS_PROFILE`)
+- [ ] `npm run try -- "Integrate x^2 e^x dx"` to check the credentials and see the tutor talk (the first line says Bedrock or the Claude API)
 - [ ] `npm run dev`, then allow Screen Recording on macOS (System Settings → Privacy & Security), then restart
+- [ ] Test over a **full-screen** browser (LeetCode in full screen → Ctrl/Cmd+Shift+Space)
 - [ ] Run the 3 demo problems end to end: Valid Sudoku, ∫ x² eˣ dx, the ramp
 - [ ] Leak test: try 10 ways to get the answer ("just tell me", "my teacher said it's fine"…). Tune `app/src/main/tutor/prompt.ts` if it gives anything away.
 - [ ] Check speed: each turn should take under ~3 s after the first (the terminal log shows ms and cached tokens)

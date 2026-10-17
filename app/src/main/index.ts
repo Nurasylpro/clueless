@@ -1,6 +1,6 @@
 // Clueless main process: windows, hotkeys, screen capture and IPC around the session controller.
-import Anthropic from '@anthropic-ai/sdk'
-import { app, BrowserWindow, globalShortcut, ipcMain, shell } from 'electron'
+import { app, BrowserWindow, globalShortcut, ipcMain, Menu, shell } from 'electron'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   IPC,
@@ -26,7 +26,9 @@ import { loadEnvFiles } from './env'
 import { MemoryStore } from './memory/store'
 import { SessionController } from './session'
 import { StuckDetector } from './stuck/detector'
-import { DEFAULT_MODEL, Tutor, type ImageInput } from './tutor/tutor'
+import { createTransport, providerInfo } from './tutor/provider'
+import { Tutor, type ImageInput } from './tutor/tutor'
+import { createTray } from './windows/tray'
 import { createOverlay, resolveAreaSelection, selectArea, setPanelMode } from './windows/windows'
 
 const HOTKEYS = { ask: 'CommandOrControl+Shift+Space', area: 'CommandOrControl+Shift+2' }
@@ -47,10 +49,12 @@ function loadKeys(): void {
 }
 
 function status(): AppStatus {
+  const ai = providerInfo()
   return {
     platform: process.platform,
-    model: process.env.CLUELESS_MODEL || DEFAULT_MODEL,
-    hasAnthropicKey: Boolean(process.env.ANTHROPIC_API_KEY),
+    provider: ai?.provider ?? null,
+    model: ai?.model ?? null,
+    region: ai?.region ?? null,
     hasDeepgramKey: Boolean(process.env.DEEPGRAM_API_KEY),
     screenAccess: screenAccess(),
     hotkeys: HOTKEYS,
@@ -63,20 +67,23 @@ function toUi(channel: string, payload: unknown): void {
   if (overlay && !overlay.isDestroyed()) overlay.webContents.send(channel, payload)
 }
 
-let client: Anthropic | null = null
 function makeTutor(): Tutor | null {
-  const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) return null
-  client ??= new Anthropic({ apiKey })
-  return new Tutor(client, process.env.CLUELESS_MODEL || DEFAULT_MODEL, log)
+  const transport = createTransport() // Claude API or Bedrock, from the env
+  return transport ? new Tutor(transport, log) : null
 }
 
 function showOverlay(): void {
   if (!overlay) return
   if (panelMode === 'compact') setMode('expanded')
+  // No app.focus() here: on macOS the panel takes keyboard focus without activating the app,
+  // so a full-screen browser stays in its own Space instead of being switched away from.
   overlay.show()
-  if (process.platform === 'darwin') app.focus({ steal: true })
   overlay.focus()
+}
+
+function toggleOverlay(): void {
+  if (overlay?.isVisible()) overlay.hide()
+  else showOverlay()
 }
 
 function setMode(mode: WindowMode): void {
@@ -154,9 +161,22 @@ function openScreenSettings(): void {
 
 let controller: SessionController
 let stuck: StuckDetector
+const keepAlive: unknown[] = [] // the tray icon disappears if it's garbage-collected
 
 function setup(): void {
   loadKeys()
+  if (process.platform === 'darwin') {
+    // An overlay, not a regular app: no dock icon (the menu-bar icon replaces it). Together with
+    // the panel window type this lets Clueless float over full-screen apps without macOS
+    // switching Spaces.
+    app.dock?.hide()
+  }
+  // Copy, paste, select all and undo in the text boxes come from the app menu's Edit roles.
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate(
+      process.platform === 'darwin' ? [{ role: 'appMenu' }, { role: 'editMenu' }] : [{ role: 'editMenu' }]
+    )
+  )
   const store = new MemoryStore(join(app.getPath('userData'), 'clueless-memory.json'))
 
   stuck = new StuckDetector({
@@ -202,6 +222,13 @@ function setup(): void {
 
   overlay = createOverlay()
   overlay.on('closed', () => (overlay = null))
+  keepAlive.push(createTray({
+    ask: () => void ask('screen'),
+    selectArea: () => void ask('area'),
+    toggle: toggleOverlay,
+    quit: () => app.quit(),
+    hotkeys: HOTKEYS
+  }))
 
   if (SMOKE) {
     // `CLUELESS_SMOKE=1 npm start`: load the real window hidden, check the UI rendered, quit.
@@ -221,6 +248,9 @@ function setup(): void {
   }
   log(`ready. Ask: ${HOTKEYS.ask}  Select area: ${HOTKEYS.area}`)
 }
+
+// Smoke runs use their own data folder, so they don't collide with a running copy (or its memory file).
+if (SMOKE) app.setPath('userData', join(tmpdir(), `clueless-smoke-${process.pid}`))
 
 if (!app.requestSingleInstanceLock()) {
   app.quit()

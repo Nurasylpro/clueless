@@ -128,13 +128,14 @@ export type WindowMode = 'compact' | 'expanded'
 
 export interface AppStatus {
   platform: string
-  model: string
-  hasAnthropicKey: boolean
+  provider: 'anthropic' | 'bedrock' | null // null = no Claude credentials configured yet
+  model: string | null
+  region: string | null // Bedrock only
   hasDeepgramKey: boolean
   screenAccess: 'granted' | 'denied' | 'not-determined' | 'restricted' | 'unknown'
   hotkeys: { ask: string; area: string }
   hotkeyErrors: string[]
-  envFile: string // where to put API keys
+  envFile: string // where to put API keys / AWS settings
 }
 
 // ---------- memory ----------

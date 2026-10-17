@@ -26,8 +26,9 @@ export function createMockApi(): CluelessApi {
 
   const status: AppStatus = {
     platform: navigator.platform.toLowerCase().includes('mac') ? 'darwin' : 'win32',
+    provider: 'bedrock',
     model: 'mock',
-    hasAnthropicKey: true,
+    region: 'us-east-1',
     hasDeepgramKey: false,
     screenAccess: 'granted',
     hotkeys: { ask: 'CommandOrControl+Shift+Space', area: 'CommandOrControl+Shift+2' },

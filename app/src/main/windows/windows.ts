@@ -8,6 +8,10 @@ export const PANEL_SIZE: Record<WindowMode, { width: number; height: number }> =
   compact: { width: 440, height: 84 }
 }
 
+// macOS: a 'panel' window floats over full-screen apps and appears on every Space, and it takes
+// keyboard focus without activating the app, so a full-screen browser isn't switched away from.
+const PANEL_TYPE = process.platform === 'darwin' ? { type: 'panel' } : {}
+
 const webPreferences = {
   preload: join(__dirname, '../preload/index.js'),
   contextIsolation: true,
@@ -39,9 +43,11 @@ export function createOverlay(): BrowserWindow {
     hasShadow: false,
     alwaysOnTop: true,
     backgroundColor: '#00000000',
+    ...PANEL_TYPE,
     webPreferences
   })
-  win.setAlwaysOnTop(true, 'floating')
+  // 'screen-saver' keeps it above full-screen windows (and above browsers in F11 on Windows).
+  win.setAlwaysOnTop(true, 'screen-saver')
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
   // Never call win.setContentProtection(true): that's how Cluely hides from screen share.
   // Clueless stays visible by design.
@@ -83,9 +89,10 @@ export function selectArea(display: Display): Promise<Rect | null> {
       skipTaskbar: true,
       alwaysOnTop: true,
       backgroundColor: '#00000000',
+      ...PANEL_TYPE,
       webPreferences
     })
-    win.setAlwaysOnTop(true, 'screen-saver')
+    win.setAlwaysOnTop(true, 'screen-saver', 1) // one level above the panel
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
 
     const done = (rect: Rect | null): void => {
