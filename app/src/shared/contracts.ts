@@ -200,11 +200,32 @@ export const IPC = {
   getSession: 'session:get',
   getMemory: 'memory:get',
   rateCard: 'memory:rate', // { id, rating } -> MemoryView
-  // Voice (reserved for the voice feature)
-  voiceToggle: 'voice:toggle',
-  voiceAudio: 'voice:audio', // ArrayBuffer chunk from MediaRecorder (webm/opus)
-  voiceTranscript: 'voice:transcript' // main -> UI: { text, final }
+  // Voice: one recording ("utterance") at a time, identified by an id the UI makes up
+  voiceToggle: 'voice:toggle', // main -> UI: the voice hotkey was pressed
+  voiceStart: 'voice:start', // UI -> main: utterance id
+  voiceAudio: 'voice:audio', // UI -> main: { id, chunk } (MediaRecorder webm/opus bytes)
+  voiceStop: 'voice:stop', // UI -> main: utterance id; finish and send the final transcript
+  voiceCancel: 'voice:cancel', // UI -> main: utterance id; drop it, no transcript
+  voiceTranscript: 'voice:transcript', // main -> UI: VoiceTranscript
+  voiceState: 'voice:state', // main -> UI: VoiceStateEvent
+  voiceMicAccess: 'voice:mic-access' // UI -> main (invoke): ask the OS for the microphone -> boolean
 } as const
+
+// ---------- voice ----------
+
+/** Live transcript of one utterance. `final` arrives at most once, when the student has paused. */
+export interface VoiceTranscript {
+  id: string
+  text: string // everything heard so far
+  interim: string // the end of `text` that may still change ("" once final)
+  final: boolean
+}
+
+/** Deepgram connection state for one utterance. 'closed' always comes last. */
+export type VoiceStateEvent =
+  | { id: string; state: 'listening' }
+  | { id: string; state: 'closed'; reason: 'done' | 'no-speech' | 'cancelled' }
+  | { id: string; state: 'error'; message: string }
 
 /** The API the preload script exposes to the UI as `window.clueless`. */
 export interface CluelessApi {
@@ -228,4 +249,13 @@ export interface CluelessApi {
   rateCard(id: string, rating: CardRating): Promise<MemoryView>
   areaDone(rect: Rect): void
   areaCancel(): void
+  // voice
+  micAccess(): Promise<boolean>
+  voiceStart(id: string): void
+  voiceAudio(id: string, chunk: ArrayBuffer): void
+  voiceStop(id: string): void
+  voiceCancel(id: string): void
+  onVoiceTranscript(cb: (t: VoiceTranscript) => void): () => void
+  onVoiceState(cb: (e: VoiceStateEvent) => void): () => void
+  onVoiceToggle(cb: () => void): () => void
 }

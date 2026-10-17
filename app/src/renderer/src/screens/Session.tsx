@@ -23,9 +23,10 @@ import {
   SendIcon
 } from '../components/icons'
 import { Markdown, MathText, mathToHtml } from '../components/Markdown'
-import { MicButton } from '../components/MicButton'
+import { MicButton, VoiceStrip } from '../components/MicButton'
 import { Button, cx, IconButton } from '../components/ui'
 import { VisualSlot } from '../components/VisualSlot'
+import { useVoiceInput } from '../voice/useVoiceInput'
 
 type ComposerMode = 'answer' | 'recall'
 
@@ -438,6 +439,39 @@ function Composer({
     setMode('answer')
   }
 
+  // Voice: the final transcript goes through the same send as typing (spoken math is sent as text,
+  // so the checker and the tutor read it like a typed sentence). Whatever was typed stays in the box.
+  const [voiceSent, setVoiceSent] = useState(false)
+  const sawBusy = useRef(false)
+  const voice = useVoiceInput((spoken) => {
+    api.send({ text: spoken, as: mode === 'recall' ? 'recall' : 'text' })
+    setMode('answer')
+    sawBusy.current = false
+    setVoiceSent(true)
+  })
+  // "Waiting for Clueless" lasts until the tutor's reply (or an error) arrives.
+  useEffect(() => {
+    if (!voiceSent) return
+    if (disabled) sawBusy.current = true
+    else if (sawBusy.current) setVoiceSent(false)
+    const t = setTimeout(() => !sawBusy.current && setVoiceSent(false), 3000) // never got busy
+    return () => clearTimeout(t)
+  }, [voiceSent, disabled])
+  // The voice hotkey (Ctrl/Cmd+Shift+1) starts or stops talking.
+  const voiceRef = useRef(voice)
+  voiceRef.current = voice
+  useEffect(
+    () =>
+      api.onVoiceToggle(() => {
+        const v = voiceRef.current
+        if (v.state === 'starting' || v.state === 'listening') v.stop()
+        else if (!disabledRef.current && v.state !== 'finishing') void v.start()
+      }),
+    []
+  )
+  const disabledRef = useRef(disabled)
+  disabledRef.current = disabled
+
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
     // Code: Enter is a newline, Cmd/Ctrl+Enter sends. Everything else: Enter sends.
     const send = as === 'code' ? e.key === 'Enter' && (e.metaKey || e.ctrlKey) : e.key === 'Enter' && !e.shiftKey
@@ -489,7 +523,9 @@ function Composer({
           </IconButton>
         )}
       </div>
+      <VoiceStrip voice={voice} onDismiss={voice.cancel} />
       <div className="flex items-end gap-1.5 rounded-xl border border-zinc-900/10 bg-white/70 px-2 py-1 focus-within:border-claude-500 dark:border-white/15 dark:bg-black/35">
+
         <textarea
           ref={input}
           value={text}
@@ -503,7 +539,7 @@ function Composer({
             as === 'code' && 'font-mono text-[12.5px]'
           )}
         />
-        <MicButton onTranscript={(t) => setText(t)} disabled={disabled} />
+        <MicButton voice={voice} processing={voiceSent} disabled={disabled} />
         <IconButton
           title="Send"
           onClick={() => submit()}
