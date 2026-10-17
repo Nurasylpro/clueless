@@ -66,7 +66,40 @@ export interface TutorReplyT {
 export type ProblemView = Omit<ProblemInfo, 'hiddenSolution'>
 
 /** A tutor turn as shown in the UI: the answer-check reference is stripped out. */
-export type TurnView = Omit<TutorTurn, 'check'> & { checkKind: AnswerCheck['kind'] | null }
+export type TurnView = Omit<TutorTurn, 'check'> & {
+  checkKind: AnswerCheck['kind'] | null
+  animation: TurnAnimation | null // set when the student asked for this turn with an animate button
+}
+
+// ---------- animation ----------
+
+/** What the student asked to animate (the Animate button's three options). */
+export type AnimateTarget = 'code' | 'problem' | 'question'
+
+/** A box the student dragged on one display. rect is in DIP, relative to the display's top-left. */
+export interface ScreenArea {
+  displayId: number
+  rect: Rect
+}
+
+/** How a turn's visual plays. 'code' with an area draws over the student's code on screen;
+ *  everything else plays inside the panel (explain mode). */
+export interface TurnAnimation {
+  target: AnimateTarget
+  area: ScreenArea | null
+}
+
+/** UI -> main: play a visual over the student's code. `nonce` changes on every replay. */
+export interface StagePlay {
+  visual: Visual
+  area: ScreenArea
+  nonce: number
+}
+
+/** main -> stage window: what to draw. `avoid` is the panel, in the same display coordinates. */
+export interface StageShow extends StagePlay {
+  avoid: Rect | null
+}
 
 export interface CheckResult {
   status: 'match' | 'mismatch' | 'missing_units' | 'wrong_units' | 'unparseable'
@@ -123,8 +156,12 @@ export type UserAction =
   | 'finish'
   | 'new'
   | 'retry'
+  | 'animate_code'
+  | 'animate_problem'
+  | 'animate_question'
 
-export type WindowMode = 'compact' | 'expanded'
+/** 'wide' = expanded with the animation pane next to the conversation (explain mode). */
+export type WindowMode = 'compact' | 'expanded' | 'wide'
 
 export interface AppStatus {
   platform: string
@@ -198,6 +235,10 @@ export const IPC = {
   getSession: 'session:get',
   getMemory: 'memory:get',
   rateCard: 'memory:rate', // { id, rating } -> MemoryView
+  // Code-mode animation: a click-through window over the student's code
+  stagePlay: 'stage:play', // UI -> main: StagePlay
+  stageStop: 'stage:stop', // UI -> main
+  stageShow: 'stage:show', // main -> stage window: StageShow | null
   // Voice (reserved for the voice feature)
   voiceToggle: 'voice:toggle',
   voiceAudio: 'voice:audio', // ArrayBuffer chunk from MediaRecorder (webm/opus)
@@ -223,4 +264,7 @@ export interface CluelessApi {
   rateCard(id: string, rating: CardRating): Promise<MemoryView>
   areaDone(rect: Rect): void
   areaCancel(): void
+  playOnScreen(play: StagePlay): void
+  stopOnScreen(): void
+  onStage(cb: (show: StageShow | null) => void): () => void
 }

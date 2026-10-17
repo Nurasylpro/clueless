@@ -1,30 +1,46 @@
-// ┌──────────────────────────────────────────────────────────────────────────────┐
-// │ VISUALIZATION: owned by the visual-engine teammate.                          │
-// │                                                                              │
-// │ The tutor already sends `visual` on turns where a picture helps. Its shape   │
-// │ is `Visual` / `Scene` in src/shared/schema.ts:                               │
-// │   array, grid, hashmap, sets, plot, vectors, numberline, tree, graph         │
-// │ `frames` is a list of scenes to step through (1 frame = a still picture).    │
-// │ Empty values are "" (labels), -1 (flash, boxSize, surfaceAngleDeg), [].     │
-// │                                                                              │
-// │ Replace this placeholder with real drawings (SVG + Motion for data          │
-// │ structures, Mafs for plots and vectors). Run `npm run ui` to work on it in a │
-// │ browser with mock data: mock/fixtures.ts has a "sets" and a "grid" example.  │
-// └──────────────────────────────────────────────────────────────────────────────┘
-import type { Visual } from '../../../shared/contracts'
-import { ChartIcon } from './icons'
+// The play button under a tutor turn that has a visual. The student reads the text first, then
+// chooses to play it: nothing animates on its own. No visual on the turn = no button.
+// Code-mode turns play over the student's code; everything else plays in the widened panel.
+// The drawings themselves live in ../visuals (SceneView).
+import type { TurnView } from '../../../shared/contracts'
+import { playsOnCode, usePlayback } from '../visuals/playback'
+import { CloseIcon, PlayIcon, RetryIcon } from './icons'
+import { Button } from './ui'
 
-export function VisualSlot({ visual }: { visual: Visual }) {
-  const kinds = [...new Set(visual.frames.map((f) => f.type))].join(', ')
+export function VisualSlot({ itemId, turn }: { itemId: string; turn: TurnView }) {
+  const { playing, play, replay, stop } = usePlayback()
+  const visual = turn.visual
+  if (!visual || visual.frames.length === 0) return null
+  const active = playing?.itemId === itemId
+  const onCode = playsOnCode(turn.animation)
+  const steps = `${visual.frames.length} step${visual.frames.length === 1 ? '' : 's'}`
+
   return (
-    <div className="mt-2 flex items-center gap-2 rounded-lg border border-dashed border-zinc-300 px-2.5 py-2 text-xs text-zinc-500 dark:border-white/15 dark:text-zinc-400">
-      <ChartIcon size={14} />
-      <span className="min-w-0 flex-1 truncate">
-        {visual.caption || 'Visual'} · {kinds} · {visual.frames.length} frame{visual.frames.length === 1 ? '' : 's'}
-      </span>
-      <span className="shrink-0 rounded bg-zinc-100 px-1.5 py-px text-[10px] uppercase tracking-wide dark:bg-white/10">
-        coming soon
-      </span>
+    <div className="mt-2 flex items-center gap-2 rounded-lg border border-amber-300/60 bg-amber-50/50 px-2 py-1.5 text-xs dark:border-amber-500/25 dark:bg-amber-500/5">
+      {active ? (
+        <>
+          <span className="flex h-2 w-2 shrink-0 rounded-full bg-amber-400 glow-dot" />
+          <span className="min-w-0 flex-1 truncate text-zinc-600 dark:text-zinc-300">
+            {onCode ? 'Playing on your code' : 'Playing on the left'}
+          </span>
+          <Button variant="chip" onClick={replay} title="Play it again from the start">
+            <RetryIcon size={12} /> Replay
+          </Button>
+          <Button variant="chip" onClick={stop} title="Close the animation">
+            <CloseIcon size={12} /> Close
+          </Button>
+        </>
+      ) : (
+        <>
+          <Button variant="primary" onClick={() => play(itemId, turn)} className="h-7 gap-1 px-2 text-[11.5px]">
+            <PlayIcon size={11} /> {onCode ? 'Play on my code' : 'Play animation'}
+          </Button>
+          <span className="min-w-0 flex-1 truncate text-zinc-500 dark:text-zinc-400" title={visual.caption}>
+            {visual.caption ? `${visual.caption} · ` : ''}
+            {steps}
+          </span>
+        </>
+      )}
     </div>
   )
 }

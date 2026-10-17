@@ -5,7 +5,8 @@ import type { Rect, WindowMode } from '../../shared/contracts'
 
 export const PANEL_SIZE: Record<WindowMode, { width: number; height: number }> = {
   expanded: { width: 440, height: 720 },
-  compact: { width: 440, height: 84 }
+  compact: { width: 440, height: 84 },
+  wide: { width: 860, height: 720 } // explain-mode animation pane + the conversation
 }
 
 // macOS: a 'panel' window floats over full-screen apps and appears on every Space, and it takes
@@ -61,9 +62,41 @@ export function createOverlay(): BrowserWindow {
 
 export function setPanelMode(win: BrowserWindow, mode: WindowMode): void {
   const { width, height } = PANEL_SIZE[mode]
-  const [x, y] = win.getPosition()
-  const work = screen.getDisplayNearestPoint({ x, y }).workArea
-  win.setBounds({ x, y, width, height: Math.min(height, work.height - 32) })
+  const old = win.getBounds()
+  const work = screen.getDisplayMatching(old).workArea
+  // Keep the right edge in place, so going wide grows the panel to the left.
+  const x = Math.max(work.x, Math.min(old.x + old.width - width, work.x + work.width - width))
+  win.setBounds({ x, y: old.y, width, height: Math.min(height, work.height - 32) })
+}
+
+// ---------- code-mode animation ----------
+
+/** A see-through, click-through layer over `display` that draws animations on the student's code. */
+export function createStage(display: Display): BrowserWindow {
+  const win = new BrowserWindow({
+    ...display.bounds,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    focusable: false, // never steals focus from the student's editor or the panel
+    enableLargerThanScreen: true,
+    hasShadow: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    backgroundColor: '#00000000',
+    ...PANEL_TYPE,
+    webPreferences
+  })
+  win.setIgnoreMouseEvents(true) // clicks go through to the code (and the panel) underneath
+  win.setAlwaysOnTop(true, 'screen-saver')
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
+  loadRenderer(win, 'stage')
+  return win
 }
 
 // ---------- area selection ----------

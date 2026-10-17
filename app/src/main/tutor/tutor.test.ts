@@ -32,7 +32,7 @@ const wireTurn = {
   gap: { type: 'none', topic: '' },
   expects: 'math',
   choices: [],
-  visual: { caption: '', frames: [] },
+  visual: { caption: '', frames: [], focus: [] },
   check: { kind: 'antiderivative', reference: 'x^2*e^x', variable: 'x', unit: '' }
 }
 

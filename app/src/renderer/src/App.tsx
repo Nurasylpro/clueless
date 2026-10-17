@@ -1,14 +1,26 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { AppStatus, MemoryView, SessionView } from '../../shared/contracts'
+import { MotionConfig } from 'motion/react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { AppStatus, MemoryView, SessionView, StageShow, WindowMode } from '../../shared/contracts'
 import { api, isMock } from './api'
 import { AreaSelector } from './screens/AreaSelector'
 import { Banners, EmptyState, GLASS_ALPHA, Header, type Glass } from './screens/Home'
 import { ReviewScreen } from './screens/Review'
 import { SessionScreen } from './screens/Session'
+import { AnimationPane } from './visuals/AnimationPane'
+import { CodeOverlay, StageScreen } from './visuals/CodeOverlay'
+import { PlaybackContext, playsOnCode, type Playback, type Playing } from './visuals/playback'
 
 export function App() {
   if (window.location.hash === '#select') return <AreaSelector />
-  return <Overlay />
+  return (
+    <MotionConfig reducedMotion="user">{window.location.hash === '#stage' ? <StageScreen /> : <Overlay />}</MotionConfig>
+  )
+}
+
+/** The window size for this state: wide while an explain-mode animation is open. */
+function windowMode(compact: boolean, playing: Playing | null): WindowMode {
+  if (compact) return 'compact'
+  return playing && !playsOnCode(playing.animation) ? 'wide' : 'expanded'
 }
 
 function Overlay() {
@@ -18,6 +30,8 @@ function Overlay() {
   const [compact, setCompact] = useState(false)
   const [dueCards, setDueCards] = useState(0)
   const [glass, setGlass] = useState<Glass>(loadGlass)
+  const [playing, setPlaying] = useState<Playing | null>(null)
+  const [mockStage, setMockStage] = useState<StageShow | null>(null)
 
   useEffect(() => {
     if (isMock) document.body.classList.add('mock-desktop')
@@ -26,6 +40,8 @@ function Overlay() {
     void api.getMemory().then((m) => setDueCards(m.dueCards.length))
     const offSession = api.onSession(setSession)
     const offStatus = api.onStatus(setStatus)
+    // Browser mock mode has no stage window: draw code-mode animations in this page instead.
+    const offStage = isMock ? api.onStage(setMockStage) : () => {}
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'Escape') api.hide()
     }
@@ -33,12 +49,43 @@ function Overlay() {
     return () => {
       offSession()
       offStatus()
+      offStage()
       window.removeEventListener('keydown', onKey)
     }
   }, [])
 
-  // A new problem: back to the main screen, full size.
+  const playback = useMemo<Playback>(
+    () => ({
+      playing,
+      play(itemId, turn) {
+        if (!turn.visual) return
+        const next: Playing = { itemId, visual: turn.visual, message: turn.message, animation: turn.animation, nonce: Date.now() }
+        if (playsOnCode(next.animation)) api.playOnScreen({ visual: next.visual, area: next.animation!.area!, nonce: next.nonce })
+        else if (playing && playsOnCode(playing.animation)) api.stopOnScreen()
+        api.setWindowMode(windowMode(compact, next))
+        setPlaying(next)
+      },
+      replay() {
+        if (!playing) return
+        const next = { ...playing, nonce: playing.nonce + 1 }
+        if (playsOnCode(next.animation)) api.playOnScreen({ visual: next.visual, area: next.animation!.area!, nonce: next.nonce })
+        setPlaying(next)
+      },
+      stop() {
+        if (!playing) return
+        if (playsOnCode(playing.animation)) api.stopOnScreen()
+        api.setWindowMode(windowMode(compact, null))
+        setPlaying(null)
+      }
+    }),
+    [playing, compact]
+  )
+  const stopPlayback = useRef(playback.stop)
+  stopPlayback.current = playback.stop
+
+  // A new problem (or none): close any animation, back to the main screen, full size.
   useEffect(() => {
+    stopPlayback.current()
     if (!session?.id) return
     setScreen('main')
     setCompact(false)
@@ -52,7 +99,7 @@ function Overlay() {
   const toggleCompact = (): void => {
     const next = !compact
     setCompact(next)
-    api.setWindowMode(next ? 'compact' : 'expanded')
+    api.setWindowMode(windowMode(next, playing))
   }
 
   const onMemory = useCallback((m: MemoryView) => setDueCards(m.dueCards.length), [])
@@ -66,43 +113,56 @@ function Overlay() {
     }
   }
 
+  const explain = playing && !playsOnCode(playing.animation) ? playing : null
+  const onCode = Boolean(playing && playsOnCode(playing.animation))
+
   return (
-    <div className={isMock ? 'flex h-full items-start justify-end p-6' : 'h-full p-2'} data-app-ready>
-      {isMock && <MockDesktop />}
-      <div
-        className={
-          'glass-panel relative flex flex-col overflow-hidden rounded-2xl text-zinc-900 shadow-2xl dark:text-zinc-100 ' +
-          (glass === 'clear' ? 'glass-clear ' : '') +
-          (isMock ? 'w-[424px] ' + (compact ? 'h-[68px]' : 'h-[704px] max-h-full') : 'h-full')
-        }
-        style={{ '--glass': GLASS_ALPHA[glass] } as React.CSSProperties}
-      >
-        <Header
-          compact={compact}
-          dueCards={dueCards}
-          stuck={session?.stuck ?? null}
-          glass={glass}
-          onGlass={changeGlass}
-          onToggleCompact={toggleCompact}
-          onOpenReview={() => {
-            if (compact) toggleCompact()
-            setScreen('review')
-          }}
-        />
-        {!compact && (
-          <>
-            <Banners status={status} />
-            {screen === 'review' ? (
-              <ReviewScreen onBack={() => setScreen('main')} onChange={onMemory} />
-            ) : session ? (
-              <SessionScreen session={session} onOpenReview={() => setScreen('review')} />
-            ) : (
-              <EmptyState status={status} />
-            )}
-          </>
-        )}
+    <PlaybackContext.Provider value={playback}>
+      <div className={isMock ? 'flex h-full items-start justify-end p-6' : 'h-full p-2'} data-app-ready>
+        {isMock && <MockDesktop />}
+        <div
+          className={
+            'glass-panel relative flex flex-col overflow-hidden rounded-2xl text-zinc-900 shadow-2xl transition-opacity duration-300 dark:text-zinc-100 ' +
+            (glass === 'clear' ? 'glass-clear ' : '') +
+            // Code mode: the panel turns see-through so the animation on the code is the focus.
+            (onCode ? 'opacity-40 hover:opacity-100 ' : '') +
+            (isMock ? (explain && !compact ? 'w-[844px] ' : 'w-[424px] ') + (compact ? 'h-[68px]' : 'h-[704px] max-h-full') : 'h-full')
+          }
+          style={{ '--glass': GLASS_ALPHA[glass] } as React.CSSProperties}
+        >
+          <Header
+            compact={compact}
+            dueCards={dueCards}
+            stuck={session?.stuck ?? null}
+            glass={glass}
+            onGlass={changeGlass}
+            onToggleCompact={toggleCompact}
+            onOpenReview={() => {
+              if (compact) toggleCompact()
+              setScreen('review')
+            }}
+          />
+          {!compact && (
+            <>
+              <Banners status={status} />
+              <div className="flex min-h-0 flex-1">
+                {explain && <AnimationPane playing={explain} onReplay={playback.replay} onClose={playback.stop} />}
+                <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                  {screen === 'review' ? (
+                    <ReviewScreen onBack={() => setScreen('main')} onChange={onMemory} />
+                  ) : session ? (
+                    <SessionScreen session={session} onOpenReview={() => setScreen('review')} />
+                  ) : (
+                    <EmptyState status={status} />
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+        {isMock && mockStage && <CodeOverlay show={mockStage} />}
       </div>
-    </div>
+    </PlaybackContext.Provider>
   )
 }
 
@@ -116,7 +176,8 @@ function loadGlass(): Glass {
   return 'glass'
 }
 
-/** Browser mock mode only: a fake code editor behind the panel, to show the glass effect. */
+/** Browser mock mode only: a fake code editor behind the panel, to show the glass effect.
+ *  Its layout matches MOCK_CODE_AREA in mock/fixtures.ts (40px padding, 28px lines). */
 function MockDesktop() {
   return (
     <pre className="pointer-events-none fixed inset-0 overflow-hidden p-10 font-mono text-[15px] leading-7 text-sky-200/80">

@@ -1,5 +1,5 @@
 // Clueless main process: windows, hotkeys, screen capture and IPC around the session controller.
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, shell } from 'electron'
+import { app, BrowserWindow, globalShortcut, ipcMain, Menu, screen, shell, type Display, type NativeImage } from 'electron'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -9,6 +9,8 @@ import {
   type InputKind,
   type Rect,
   type SessionView,
+  type StagePlay,
+  type StageShow,
   type Subject,
   type UserAction,
   type WindowMode
@@ -24,17 +26,20 @@ import {
 } from './capture/capture'
 import { loadEnvFiles } from './env'
 import { MemoryStore } from './memory/store'
-import { SessionController } from './session'
+import { SessionController, type AreaCapture } from './session'
 import { StuckDetector } from './stuck/detector'
 import { createTransport, providerInfo } from './tutor/provider'
 import { Tutor, type ImageInput } from './tutor/tutor'
 import { createTray } from './windows/tray'
-import { createOverlay, resolveAreaSelection, selectArea, setPanelMode } from './windows/windows'
+import { createOverlay, createStage, resolveAreaSelection, selectArea, setPanelMode } from './windows/windows'
 
 const HOTKEYS = { ask: 'CommandOrControl+Shift+Space', area: 'CommandOrControl+Shift+2' }
 const SMOKE = process.env.CLUELESS_SMOKE === '1'
 
 let overlay: BrowserWindow | null = null
+let stage: BrowserWindow | null = null // code-mode animations, drawn over the student's code
+let stageLoaded = false
+let stageShow: StageShow | null = null
 let panelMode: WindowMode = 'expanded'
 let capturing = false
 const hotkeyErrors: string[] = []
@@ -91,19 +96,112 @@ function setMode(mode: WindowMode): void {
   if (overlay) setPanelMode(overlay, mode)
 }
 
+/** Make Clueless's own windows invisible (or visible again), so captures only see the student's screen. */
+function setOwnWindowsOpacity(opacity: number): void {
+  for (const win of [overlay, stage]) if (win && !win.isDestroyed()) win.setOpacity(opacity)
+}
+
 /** Hide the panel (without losing its place) while the screen is captured. */
 async function withPanelHidden<T>(fn: () => Promise<T>): Promise<T> {
-  const win = overlay
-  const visible = Boolean(win?.isVisible())
-  if (win && visible) {
-    win.setOpacity(0)
+  const visible = Boolean(overlay?.isVisible() || stage?.isVisible())
+  if (visible) {
+    setOwnWindowsOpacity(0)
     await sleep(150)
   }
   try {
     return await fn()
   } finally {
-    if (win && visible && !win.isDestroyed()) win.setOpacity(1)
+    if (visible) setOwnWindowsOpacity(1)
   }
+}
+
+/** Let the student drag a box on the display under the mouse, then capture that display.
+ *  null = cancelled; `full` is null if the capture failed. */
+async function pickArea(): Promise<{ full: NativeImage | null; rect: Rect; display: Display } | null> {
+  const display = activeDisplay()
+  setOwnWindowsOpacity(0)
+  try {
+    const rect: Rect | null = await selectArea(display)
+    if (!rect || rect.width < 8 || rect.height < 8) return null
+    await sleep(200) // let the selection layer disappear before capturing
+    return { full: await captureDisplay(display), rect, display }
+  } finally {
+    setOwnWindowsOpacity(1)
+  }
+}
+
+/** "Animate my code": select the code, then capture the whole screen and the close-up. */
+async function captureArea(): Promise<AreaCapture | null> {
+  if (capturing) return null
+  capturing = true
+  try {
+    const picked = await pickArea()
+    showOverlay()
+    if (!picked) return null
+    if (!picked.full) {
+      controller.fail("Couldn't capture your screen. On macOS, allow Screen Recording for Clueless and restart it.")
+      return null
+    }
+    return {
+      screen: toModelImage(picked.full),
+      crop: toModelImage(cropToRect(picked.full, picked.rect, picked.display)),
+      area: { displayId: picked.display.id, rect: picked.rect }
+    }
+  } finally {
+    capturing = false
+  }
+}
+
+// ---------- code-mode animation stage ----------
+
+function isStagePlay(value: unknown): value is StagePlay {
+  const p = value as StagePlay | null
+  const r = p?.area?.rect
+  return Boolean(
+    p &&
+      Array.isArray(p.visual?.frames) &&
+      typeof p.area.displayId === 'number' &&
+      r &&
+      [r.x, r.y, r.width, r.height].every((n) => typeof n === 'number' && Number.isFinite(n))
+  )
+}
+
+function sendStage(): void {
+  if (stage && !stage.isDestroyed() && stageLoaded) stage.webContents.send(IPC.stageShow, stageShow)
+}
+
+function playOnScreen(play: StagePlay): void {
+  const display = screen.getAllDisplays().find((d) => d.id === play.area.displayId) ?? activeDisplay()
+  if (!stage || stage.isDestroyed()) {
+    const win = createStage(display)
+    stage = win
+    stageLoaded = false
+    win.webContents.once('did-finish-load', () => {
+      stageLoaded = true
+      sendStage()
+    })
+    win.on('closed', () => {
+      if (stage === win) stage = null
+    })
+  }
+  stage.setBounds(display.bounds)
+  // Tell the stage where the panel is, so the animation doesn't land under it.
+  const panel = overlay?.isVisible() ? overlay.getBounds() : null
+  const avoid = panel && {
+    x: panel.x - display.bounds.x,
+    y: panel.y - display.bounds.y,
+    width: panel.width,
+    height: panel.height
+  }
+  stageShow = { ...play, avoid }
+  sendStage()
+  stage.showInactive()
+}
+
+function stopOnScreen(): void {
+  stageShow = null
+  sendStage()
+  if (stage && !stage.isDestroyed()) stage.hide()
 }
 
 async function captureScreen(): Promise<ImageInput | null> {
@@ -126,17 +224,9 @@ async function ask(kind: 'screen' | 'area'): Promise<void> {
     }
     let image: ImageInput | null = null
     if (kind === 'area') {
-      const display = activeDisplay()
-      overlay?.setOpacity(0)
-      const rect: Rect | null = await selectArea(display)
-      if (!rect || rect.width < 8 || rect.height < 8) {
-        overlay?.setOpacity(1)
-        return
-      }
-      await sleep(200) // let the selection layer disappear before capturing
-      const full = await captureDisplay(display)
-      overlay?.setOpacity(1)
-      image = full ? toModelImage(cropToRect(full, rect, display)) : null
+      const picked = await pickArea()
+      if (!picked) return
+      image = picked.full ? toModelImage(cropToRect(picked.full, picked.rect, picked.display)) : null
     } else {
       image = await captureScreen()
     }
@@ -190,6 +280,7 @@ function setup(): void {
     makeTutor,
     memory: store,
     captureScreen,
+    captureArea,
     emit: (view: SessionView | null) => toUi(IPC.session, view),
     stuck
   })
@@ -219,6 +310,10 @@ function setup(): void {
   ipcMain.on(IPC.openScreenSettings, () => openScreenSettings())
   ipcMain.on(IPC.areaDone, (_e, rect: Rect) => resolveAreaSelection(rect))
   ipcMain.on(IPC.areaCancel, () => resolveAreaSelection(null))
+  ipcMain.on(IPC.stagePlay, (_e, play: unknown) => {
+    if (isStagePlay(play)) playOnScreen(play)
+  })
+  ipcMain.on(IPC.stageStop, () => stopOnScreen())
 
   overlay = createOverlay()
   overlay.on('closed', () => (overlay = null))

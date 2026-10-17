@@ -5,12 +5,14 @@ import type {
   AnswerCheck,
   InputKind,
   ProblemInfo,
+  ScreenArea,
   SessionView,
   StuckState,
   Subject,
   ThreadItem,
   TutorReplyT,
   TutorTurn,
+  TurnAnimation,
   TurnView,
   UserAction
 } from '../shared/contracts'
@@ -20,12 +22,21 @@ import { TutorError, type ImageInput, type SendInput, type TutorLike } from './t
 
 export const REVEAL_AFTER_ATTEMPTS = 3
 
+/** "Animate my code": the student dragged a box around their code. */
+export interface AreaCapture {
+  screen: ImageInput // the whole display, for context
+  crop: ImageInput // just the selected area
+  area: ScreenArea
+}
+
 export interface ControllerDeps {
   /** A fresh tutor for a new problem, or null when there's no API key. */
   makeTutor(): TutorLike | null
   memory: MemoryStore
   /** Capture the screen for "Check my work". */
   captureScreen(): Promise<ImageInput | null>
+  /** Let the student drag a box around their code and capture it. null = cancelled. */
+  captureArea(): Promise<AreaCapture | null>
   emit(view: SessionView | null): void
   stuck: {
     start(): Promise<void> | void
@@ -142,6 +153,26 @@ export class SessionController {
           return this.attempt(() => this.round({ tag: 'REVEAL', notes: this.takeNotes() }))
         case 'finish':
           return this.attempt(() => this.round({ tag: 'RECAP', notes: this.takeNotes() }, 'Writing your recap…'))
+        case 'animate_code': {
+          const shot = await this.deps.captureArea()
+          if (!shot) return // the student cancelled the selection
+          const animation: TurnAnimation = { target: 'code', area: shot.area }
+          return this.attempt(() =>
+            this.round(
+              { tag: 'ANIMATE CODE', image: shot.screen, crop: shot.crop, notes: this.takeNotes() },
+              'Getting the animation ready…',
+              animation
+            )
+          )
+        }
+        case 'animate_problem':
+        case 'animate_question': {
+          const target = action === 'animate_problem' ? 'problem' : 'question'
+          const tag = action === 'animate_problem' ? 'ANIMATE PROBLEM' : 'ANIMATE QUESTION'
+          return this.attempt(() =>
+            this.round({ tag, notes: this.takeNotes() }, 'Getting the animation ready…', { target, area: null })
+          )
+        }
       }
     })
   }
@@ -172,11 +203,11 @@ export class SessionController {
 
   // ---------- internals ----------
 
-  private async round(input: SendInput, busy = 'Thinking…'): Promise<void> {
+  private async round(input: SendInput, busy = 'Thinking…', animation: TurnAnimation | null = null): Promise<void> {
     const tutor = this.tutor
     if (!tutor) return
     const reply = await this.call(busy, () => tutor.send(input))
-    if (reply) this.applyReply(reply)
+    if (reply) this.applyReply(reply, animation)
   }
 
   private async attempt(run: () => Promise<void>): Promise<void> {
@@ -206,7 +237,7 @@ export class SessionController {
     return reply
   }
 
-  private applyReply(reply: TutorReplyT): void {
+  private applyReply(reply: TutorReplyT, animation: TurnAnimation | null = null): void {
     const view = this.view
     if (!view) return
     const turn = reply.turn
@@ -234,7 +265,7 @@ export class SessionController {
     if (turn.gap && this.problem) this.deps.memory.recordGap(this.problem.subject, turn.gap)
 
     const itemId = randomUUID()
-    view.thread.push({ id: itemId, role: 'tutor', turn: toTurnView(turn), at: Date.now() })
+    view.thread.push({ id: itemId, role: 'tutor', turn: toTurnView(turn, animation), at: Date.now() })
 
     if (reply.recap && this.problem) {
       const subject = this.problem.subject
@@ -300,9 +331,10 @@ export class SessionController {
   }
 }
 
-export function toTurnView(turn: TutorTurn): TurnView {
+export function toTurnView(turn: TutorTurn, animation: TurnAnimation | null = null): TurnView {
   const { check, ...rest } = turn
-  return { ...rest, checkKind: check?.kind ?? null }
+  // "I can't animate this." comes back without a visual: nothing to play.
+  return { ...rest, checkKind: check?.kind ?? null, animation: turn.visual ? animation : null }
 }
 
 function emptyView(): SessionView {

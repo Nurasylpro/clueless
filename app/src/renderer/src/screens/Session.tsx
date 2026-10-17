@@ -9,17 +9,20 @@ import type {
   SessionView,
   Subject,
   ThreadItem,
-  TurnView
+  TurnView,
+  UserAction
 } from '../../../shared/contracts'
 import { api } from '../api'
 import {
   BackIcon,
   BulbIcon,
   CheckIcon,
+  ChevronDownIcon,
   EyeIcon,
   FlagIcon,
   LockIcon,
   NextIcon,
+  PlayIcon,
   PlusIcon,
   RetryIcon,
   SendIcon
@@ -162,7 +165,7 @@ function Thread({ session, onOpenReview }: { session: SessionView; onOpenReview:
 }
 
 function ThreadRow({ item }: { item: ThreadItem }) {
-  if (item.role === 'tutor') return <TutorBubble turn={item.turn} />
+  if (item.role === 'tutor') return <TutorBubble itemId={item.id} turn={item.turn} />
   if (item.role === 'student') return <StudentBubble text={item.text} as={item.as} check={item.check} />
   return <div className="text-center text-xs text-zinc-400">{item.text}</div>
 }
@@ -181,7 +184,7 @@ const GAP_LABEL = {
   careless_slip: 'Careless slip'
 } as const
 
-function TutorBubble({ turn }: { turn: TurnView }) {
+function TutorBubble({ itemId, turn }: { itemId: string; turn: TurnView }) {
   const label = KIND_LABEL[turn.kind]
   const tone =
     turn.kind === 'recall_card'
@@ -211,7 +214,7 @@ function TutorBubble({ turn }: { turn: TurnView }) {
           </div>
         )}
         <Markdown text={turn.message} />
-        {turn.visual && turn.visual.frames.length > 0 && <VisualSlot visual={turn.visual} />}
+        <VisualSlot itemId={itemId} turn={turn} />
       </div>
     </div>
   )
@@ -469,10 +472,12 @@ function Composer({
             {m === 'answer' ? 'Answer' : 'How do I write…?'}
           </button>
         ))}
-        {mode === 'recall' && (
+        {mode === 'recall' ? (
           <IconButton title="Back to answering" onClick={() => setMode('answer')} className="ml-auto h-5 w-5">
             <BackIcon size={12} />
           </IconButton>
+        ) : (
+          <AnimateMenu disabled={disabled} />
         )}
       </div>
       <div className="flex items-end gap-1.5 rounded-xl border border-zinc-900/10 bg-white/70 px-2 py-1.5 focus-within:border-amber-400 dark:border-white/15 dark:bg-black/35">
@@ -502,6 +507,80 @@ function Composer({
       {as === 'math' && text.trim() && (
         <div className="mt-1.5 min-h-5 truncate px-1 text-sm text-zinc-700 dark:text-zinc-200">
           {mathToHtml(text) ? <MathText input={text} /> : <span className="text-xs text-zinc-400">Can't read that as math yet</span>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------- animate button ----------
+
+const ANIMATE_MORE: { action: UserAction; label: string; title: string }[] = [
+  { action: 'animate_problem', label: 'Animate the problem', title: "Watch the problem's example fill in, step by step" },
+  { action: 'animate_question', label: 'Animate the question', title: 'See the idea behind the current question' }
+]
+
+/** "Animate my code ▾": the student always chooses when to animate; Clueless never starts one itself. */
+function AnimateMenu({ disabled }: { disabled: boolean }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent): void => {
+      if (!box.current?.contains(e.target as Node)) setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    return () => window.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  const run = (action: UserAction): void => {
+    setOpen(false)
+    api.action(action)
+  }
+
+  const part =
+    'no-drag flex h-6 items-center border border-zinc-900/10 bg-white/70 text-zinc-700 transition-colors hover:border-amber-400 hover:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/15 dark:bg-black/40 dark:text-zinc-200 dark:hover:border-amber-400 dark:hover:text-white'
+
+  return (
+    <div ref={box} className="relative ml-auto flex">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => run('animate_code')}
+        title="Drag a box around your code, then watch it run"
+        className={cx(part, 'gap-1 rounded-l-full pl-2 pr-1.5')}
+      >
+        <PlayIcon size={10} className="text-amber-500" /> Animate my code
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen(!open)}
+        title="More ways to animate"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className={cx(part, '-ml-px rounded-r-full px-1')}
+      >
+        <ChevronDownIcon size={12} />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute bottom-full right-0 z-20 mb-1 w-48 overflow-hidden rounded-lg border border-zinc-900/10 bg-white py-1 shadow-lg dark:border-white/15 dark:bg-zinc-900"
+        >
+          {ANIMATE_MORE.map((item) => (
+            <button
+              key={item.action}
+              type="button"
+              role="menuitem"
+              title={item.title}
+              onClick={() => run(item.action)}
+              className="no-drag flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-zinc-700 hover:bg-amber-50 dark:text-zinc-200 dark:hover:bg-white/10"
+            >
+              <PlayIcon size={10} className="text-amber-500" /> {item.label}
+            </button>
+          ))}
         </div>
       )}
     </div>
