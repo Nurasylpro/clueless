@@ -1,0 +1,24 @@
+appId: dev.clueless.app
+productName: Clueless
+directories:
+  buildResources: build
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!scripts/*'
+  - '!{electron.vite.config.mts,vite.ui.config.mts,vitest.config.mts,electron-builder.yml}'
+  - '!{.env,.env.*,*.md}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+asarUnpack: []
+mac:
+  target: dmg
+  category: public.app-category.education
+  extendInfo:
+    NSMicrophoneUsageDescription: Clueless listens only while you hold the talk button.
+    NSScreenCaptureUsageDescription: Clueless reads your screen only when you press the hotkey.
+win:
+  target: nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+npmRebuild: false

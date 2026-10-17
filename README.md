@@ -2,40 +2,85 @@
 
 > Cluely gives you answers. **Clueless gives you clues.**
 
-A study buddy that floats over any app. Stuck on a problem (code, math, physics, anything)? Press
-**Ctrl/Cmd+Shift+Space**. Clueless reads your screen and coaches you through it with questions, small
-steps, live visuals and voice. It never just hands you the answer.
+A see-through study panel that floats over any app. Stuck on a problem (code, math, physics, anything)?
+Press **Ctrl/Cmd+Shift+Space**. Clueless reads your screen and coaches you through the problem with
+questions and small steps. It never just hands you the answer.
 
 - Works in **any app**, on **macOS and Windows**
 - **Any subject:** coding, math, physics and more
-- **Hints that get bigger only when you need them**, plus gap detection (forgot the syntax? didn't get the concept?)
-- **Live visuals** of what you're building: arrays, grids, hashmaps, function plots, free-body diagrams
-- **Notices when you're stuck**, without being asked
-- **Visible by design:** it shows up on screen share and doesn't hide like Cluely
+- **Hints that get bigger only when you need them** (5 levels). Reveal unlocks only after 3 real tries.
+- **Gap detection:**
+  - forgot the syntax → it shows you right away
+  - don't get the concept → a 2-minute side lesson
+  - wrong approach → questions
+  - careless slip → "check your work"
+- **A math engine checks answers** (math.js), so a right answer is never marked wrong by an AI arithmetic slip
+- **Notices when you're stuck:** the screen hasn't changed, 3 wrong answers in a row, or you opened ChatGPT or Chegg
+- **Memory:** a recap after each problem, flashcards (spaced repetition) and a gap map
+- **Visible by design:** it shows up on screen share and doesn't hide the way Cluely does
 
 ## Status
 
-Planning stage for the Lehigh hackathon (Education track). The app code goes into `app/` at the event.
-
-| Doc | What's inside |
+| Part | Status |
 |---|---|
-| [SPEC.md](SPEC.md) | The idea, rules, features, demo sessions, architecture, shared contracts, stack and why |
-| [BUILD_PLAN.md](BUILD_PLAN.md) | Who builds what, phase by phase, with checkboxes |
+| Overlay, hotkeys, screen and area capture, glass UI | ✅ built |
+| Tutor brain (Claude), hints, gaps, recap | ✅ built |
+| Answer checker, stuck detection, memory and flashcards | ✅ built, 27 tests |
+| **Visuals** (arrays, grids, plots, force diagrams…) | 🔜 Rasim: the tutor already sends the data; see `app/src/renderer/src/components/VisualSlot.tsx` |
+| **Voice** (talk to answer, think-aloud) | 🔜 Nurassyl: see `app/src/main/voice/README.md` |
+
+Docs: [SPEC.md](SPEC.md) has the idea and specs. [BUILD_PLAN.md](BUILD_PLAN.md) has what's done and what's left.
+
+## Run it
+
+You need [Node.js](https://nodejs.org) (current LTS) and a Claude API key.
+
+```bash
+cd app
+npm install
+cp .env.example .env      # then put your ANTHROPIC_API_KEY in .env
+npm run dev
+```
+
+Press **Ctrl/Cmd+Shift+Space** on any problem, or **Ctrl/Cmd+Shift+2** to select just the problem.
+
+**macOS:** the first time, allow **Screen Recording** in System Settings → Privacy & Security, for the
+app you run it from (Terminal, VS Code…). Then restart it.
+
+| Command | What it does |
+|---|---|
+| `npm run dev` | Run the app with live reload |
+| `npm run ui` | Just the UI, in a browser at http://localhost:5199, with a fake Valid Sudoku session. No Electron or key needed. Good for building the visuals. |
+| `npm run try -- "your problem"` | Talk to the tutor in the terminal (add `--image shot.png` to use a screenshot, `--debug` to see the hidden solution) |
+| `npm test` | Unit tests (checker, stuck detection, memory, tutor, session) |
+| `npm run typecheck` | TypeScript checks |
+| `npm run dist:mac` / `npm run dist:win` | Build an installer (.dmg / .exe). Build the Windows one on Windows. |
+
+`CLUELESS_SMOKE=1 npm start` launches the real app hidden, checks that the UI rendered, then quits.
+
+## How it's built
+
+```
+app/src/
+  shared/      contracts.ts (types + IPC), schema.ts (Claude's reply format), mathText.ts
+  main/        index.ts (windows, hotkeys, IPC) · session.ts (the tutoring loop)
+    tutor/     Claude calls + system prompt
+    checker/   math.js answer checks
+    stuck/     stuck detection
+    memory/    gaps, flashcards, sessions (a JSON file in the app's data folder)
+    capture/   screen capture · windows/  overlay + area selector
+    voice/     🔜
+  preload/     the safe bridge the UI talks through (window.clueless)
+  renderer/    React UI (Tailwind) · mock/ = fake data for `npm run ui`
+```
+
+Built with Electron, React, TypeScript, Tailwind, Claude Opus 5.5 (structured outputs, prompt caching), math.js, KaTeX and ts-fsrs.
 
 ## Team
 
 | Person | Area |
 |---|---|
-| Ali | Tutor brain (AI), contracts, pitch |
-| Nuris | Desktop shell: overlay, hotkeys, capture, stuck detection, answer checker, builds |
-| Rasim | UI and visuals |
-| Nurassyl | Voice, memory (flashcards, gap map, recap), demo content |
-
-## Run it (once `app/` exists)
-
-```bash
-cd app
-cp .env.example .env    # add ANTHROPIC_API_KEY and DEEPGRAM_API_KEY
-npm install
-npm run dev
-```
+| Ali | Everything built so far, pitch |
+| Rasim | Visuals |
+| Nurassyl | Voice |
+| Nuris | Suggested: Windows testing and the demo video |

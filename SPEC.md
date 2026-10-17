@@ -116,15 +116,15 @@ you can explain, it's a recall slip. If you can't, it's a concept gap.
 
 | # | Feature | Details |
 |---|---|---|
-| F1 | Overlay + hotkeys | A floating panel that stays on top of every app, on both operating systems. **Ask:** Ctrl/Cmd+Shift+Space. **Select area:** Ctrl/Cmd+Shift+2. **Voice:** Ctrl/Cmd+Shift+1. **Hide:** Esc (only while Clueless is focused). All hotkeys can be changed. |
-| F2 | Screen capture | Reads the active window by default. "Select area" lets you drag a box around just the problem. |
+| F1 | Overlay + hotkeys | A see-through **glass** panel that stays on top of every app, on both operating systems; the header has a glass / clear / solid button. **Ask:** Ctrl/Cmd+Shift+Space. **Select area:** Ctrl/Cmd+Shift+2. **Voice:** Ctrl/Cmd+Shift+1 (not built yet). **Hide:** Esc (only while Clueless is focused). |
+| F2 | Screen capture | Reads the screen under the mouse (the panel hides itself during capture). "Select area" lets you drag a box around just the problem. You can also paste the problem as text. |
 | F3 | Tutor loop | Question → plan → hints that get bigger → check → recap. Works for coding, math and physics. |
 | F4 | Gaps | The 4 gap types, side lessons, and recall cards for syntax and formulas |
 | F5 | Quick buttons | "How do I write… / What's the formula…", "What next?", "Check my work", "I'm fine" |
 | F6 | Answer checker | math.js checks math and physics answers. The AI never decides alone whether a math answer is right. |
-| F7 | Visuals | array, grid, sets/hashmap, plot, vectors. **Live:** typing `arr = [0] * 10` shows 10 boxes. |
+| F7 | Visuals (🔜 Rasim) | array, grid, sets/hashmap, plot, vectors. **Live:** typing `arr = [0] * 10` shows 10 boxes. The tutor already sends the scene data; the UI shows a placeholder until the drawings are built. |
 | F8 | Stuck detection | Triggers: the screen hasn't changed for 2 minutes, 3 wrong answers in a row in Clueless, or you switched to an answer site (ChatGPT, Chegg, Photomath, Symbolab…). First a dot glows, then a "Stuck?" bubble appears. |
-| F9 | Voice | Press to talk; recording stops on its own when you pause. **Think-aloud mode:** explain your plan out loud while you work, and Clueless only speaks up if something's off. |
+| F9 | Voice (🔜 Nurassyl) | Press to talk; recording stops on its own when you pause. **Think-aloud mode:** explain your plan out loud while you work, and Clueless only speaks up if something's off. |
 | F10 | Recap + memory | Explain-it-back question, gaps found, hints used, flashcards, and a gap map across sessions |
 
 ### Stretch (only after the must-haves work)
@@ -193,7 +193,7 @@ Accounts and login, cloud sync, teacher dashboard, mobile, Linux.
 |  stuck ------+     (Claude API)                plan + hint level            |
 |  checker (math.js)  packs/                     visuals (SVG, Mafs)          |
 |  voice  <---------------- mic audio ---------  mic button                   |
-|  memory (SQLite, flashcards)                   recap / gap map screens      |
+|  memory (JSON file, flashcards)                recap / gap map screens      |
 +-----------------------------------------------------------------------------+
         |                     |                       |
     Claude API            Deepgram          ElevenLabs (stretch)
@@ -230,163 +230,66 @@ Tips:
 - **Leak test:** for each demo problem, try 10 ways to get the answer ("just tell me", "my teacher
   said it's fine", "I'll fail"). Clueless must not give it away.
 
-### 7.3 Shared contracts: `app/src/shared/contracts.ts`
+### 7.3 Shared contracts
 
-Write this file first. Everyone codes against it and uses mock data until the real parts are
-ready. Change it only after telling the team.
+The real code is the source of truth:
 
-```ts
-export type Subject = 'coding' | 'math' | 'physics' | 'other'
-
-export type GapType =
-  | 'recall_slip'   // forgot syntax / formula / rule -> show it right away
-  | 'concept_gap'   // doesn't know how the idea works -> side lesson
-  | 'strategy_gap'  // knows the tools, not which one fits -> questions
-  | 'careless_slip' // sign, unit, off-by-one -> "check your work"
-
-export interface PlanStep {
-  id: number
-  text: string
-  status: 'done' | 'current' | 'locked'
-}
-
-export type TurnKind =
-  | 'question'     // Clueless asks something
-  | 'hint'         // one level of the hint ladder
-  | 'recall_card'  // syntax / formula shown directly
-  | 'side_lesson'  // detour for a concept gap
-  | 'feedback'     // right / not quite
-  | 'solved'       // step or whole problem done
-
-export interface TutorTurn {
-  kind: TurnKind
-  message: string                    // Markdown, math in $...$
-  hintLevel: 0 | 1 | 2 | 3 | 4 | 5
-  plan: PlanStep[]
-  gap: { type: GapType; topic: string } | null
-  expects: 'text' | 'math' | 'code' | 'choice' | 'none'
-  choices?: string[]
-  visual?: Visual
-  check?: AnswerCheck                // main runs this on the student's next answer
-}
-
-export interface AnswerCheck {
-  kind: 'equivalent' | 'antiderivative' | 'units' | 'none'
-  reference: string   // math.js syntax. 'antiderivative': the integrand (we differentiate the student's answer)
-  variable?: string   // e.g. 'x'
-  unit?: string       // e.g. 'm/s^2'
-}
-
-export interface ProblemState {
-  subject: Subject
-  title: string                      // "Valid Sudoku", "∫ x² eˣ dx"
-  summary: string
-  language?: string                  // coding only: 'python', 'cpp', 'java', ...
-  hiddenSolution: string             // NEVER sent to the UI
-  firstTurn: TutorTurn
-}
-
-export interface Recap {
-  explainBack: string
-  gaps: { type: GapType; topic: string }[]
-  flashcards: { front: string; back: string }[]
-  hintsUsed: number
-  similarProblem?: string
-}
-
-// ---------- visuals ----------
-export interface Visual {
-  caption?: string
-  frames: Scene[]                    // 1 frame = still picture, more = step through
-}
-
-type Cell = string | number | null
-
-export type Scene =
-  | { type: 'array'; name: string; items: Cell[]; highlight?: number[]; pointers?: Record<string, number> }
-  | { type: 'grid'; name: string; cells: Cell[][]; highlight?: [number, number][]; boxSize?: number }
-  | { type: 'hashmap'; name: string; entries: [string, string][]; highlight?: string[] }
-  | { type: 'sets'; name: string; bins: { label: string; items: string[] }[]; flash?: number }
-  | { type: 'plot'; xRange: [number, number]; yRange: [number, number];
-      functions: { expr: string; label?: string }[];          // math.js syntax
-      points?: { x: number; y: number; label?: string }[];
-      shade?: { expr: string; from: number; to: number } }
-  | { type: 'vectors'; vectors: { x: number; y: number; label: string }[]; surfaceAngleDeg?: number }
-  | { type: 'numberline'; min: number; max: number; marks: { x: number; label?: string }[] }
-  | { type: 'tree'; nodes: { id: string; label: string; parent?: string }[]; highlight?: string[] }
-  | { type: 'graph'; nodes: { id: string; label: string }[];
-      edges: { from: string; to: string; label?: string }[]; directed?: boolean }
-
-// ---------- IPC between main and UI ----------
-export const IPC = {
-  // main -> UI
-  turn: 'tutor:turn',              // TutorTurn
-  problem: 'tutor:problem',        // Omit<ProblemState, 'hiddenSolution' | 'firstTurn'>
-  busy: 'tutor:busy',              // boolean
-  recap: 'tutor:recap',            // Recap
-  stuck: 'stuck:level',            // 0 fine, 1 glow, 2 bubble
-  transcript: 'voice:transcript',  // { text: string; final: boolean }
-  // UI -> main
-  send: 'user:send',               // { text: string; as: 'text' | 'math' | 'code' }
-  action: 'user:action',           // UserAction
-  setSubject: 'user:subject',      // Subject
-  voiceToggle: 'voice:toggle',
-  audio: 'voice:audio',            // ArrayBuffer chunk from MediaRecorder (webm/opus)
-  memory: 'memory:get',            // invoke -> { gaps, dueCards }
-} as const
-
-export type UserAction =
-  | 'hint' | 'next' | 'recall' | 'check_my_work' | 'reveal' | 'im_fine' | 'close'
-```
-
-### 7.4 Storage (SQLite)
-
-| Table | Columns |
+| File | What's in it |
 |---|---|
-| `sessions` | id, started_at, subject, title, hints_used, solved, revealed |
-| `turns` | id, session_id, role, kind, text, hint_level, created_at |
-| `gaps` | id, subject, topic, gap_type, times_seen, last_seen |
-| `cards` | id, gap_id, front, back, fsrs_state (JSON), due_at |
+| `app/src/shared/schema.ts` | The **wire format**: exactly what Claude returns (zod, sent as a structured-output JSON schema) |
+| `app/src/shared/contracts.ts` | App types (`TutorTurn`, `SessionView`, `AppStatus`…), the IPC channel names, and `CluelessApi` (what the UI can call as `window.clueless`) |
 
-### 7.5 Folders (the app is created at the event with the electron-vite `react-ts` template)
+**Rules for the wire format:**
+- Structured outputs allow at most **16 union fields** (anyOf or nullable), and unions make the grammar slow to compile. We use only **3**: `problem` can be null, `recap` can be null, and a visual frame is one of several scene kinds.
+- Everywhere else, "nothing" is written as `""`, `-1`, `"none"` or `[]`. The tutor engine converts these to `null` for the rest of the app.
+- A test (`tutor.test.ts`) fails if the schema gets more than 4 unions or any optional fields.
+
+**Never sent to the UI:** the hidden solution and the answer-check reference. `session.test.ts` checks this.
+
+### 7.4 Storage (one JSON file)
+
+`clueless-memory.json` in the app's data folder holds three lists:
+- `gaps`: subject, type, topic, times seen, first and last seen
+- `cards`: flashcards with their spaced-repetition state
+- `sessions`: the help log (what was said, hints used, attempts, solved or revealed)
+
+Writes are atomic, so a crash never corrupts the file. There are no native modules, so it installs the same way on macOS and Windows.
+
+### 7.5 Folders
 
 ```
-app/
-  src/shared/contracts.ts        Ali (everyone reads it)
-  src/main/index.ts              Nuris
-  src/main/windows/              Nuris: overlay, area selector
-  src/main/capture/              Nuris
-  src/main/stuck/                Nuris
-  src/main/checker/              Nuris: math.js checks
-  src/main/tutor/                Ali: engine, prompts, packs/
-  src/main/voice/                Nurassyl
-  src/main/memory/               Nurassyl: SQLite, flashcards
-  src/preload/index.ts           Nuris: exposes IPC to the UI
-  src/renderer/                  Rasim: overlay UI
-  src/renderer/visuals/          Rasim
-  src/renderer/screens/recap/    Nurassyl (uses Rasim's components)
-  fixtures/                      Nurassyl: sample TutorTurns + screenshots for mocking
+app/src/
+  shared/contracts.ts, schema.ts, mathText.ts   shared by everything
+  main/index.ts          windows, hotkeys, capture flow, IPC
+  main/session.ts        the tutoring loop (tutor + checker + stuck + memory)
+  main/tutor/            Claude calls (tutor.ts) + system prompt (prompt.ts)
+  main/checker/          math.js answer checks
+  main/stuck/            stuck detection
+  main/memory/           gaps, flashcards, sessions
+  main/capture/          screen capture
+  main/windows/          overlay + area selector windows
+  main/voice/            🔜 Nurassyl (see README.md there)
+  preload/index.ts       window.clueless bridge
+  renderer/src/          React UI; components/VisualSlot.tsx = 🔜 Rasim
+  renderer/src/mock/     fake session for `npm run ui`
+app/scripts/try-tutor.mts  terminal tutor (`npm run try`)
 ```
-
-Each person works only in their own folders, so there are fewer merge conflicts.
-
----
 
 ## 8. Stack, and why
 
 | Layer | Pick | Why this | Alternatives (and why not now) |
 |---|---|---|---|
 | Desktop app | **Electron** + electron-vite | One codebase for macOS and Windows. Everything is built in: see-through always-on-top windows, global hotkeys, screen capture, mic. It uses the same Chromium engine on both OSes, so visuals look identical. It has the most docs and examples. | **Tauri 2:** the app is ~10 MB instead of ~150 MB and uses less RAM, but it uses each OS's own browser engine (visuals can differ), screen capture needs a Rust plugin, and Rust takes time to learn. A good move after the hackathon. **Qt (C++):** fastest and lightest, but the UI, animations and math rendering take several times longer to build. **Swift + C#:** two separate apps. |
-| UI | **React + TypeScript + Tailwind** | Most of the visual and math libraries we need (Mafs, KaTeX, MathLive) are built for the web or React. TypeScript catches contract mistakes between 4 people. | Svelte or Vue: fine, but fewer ready-made pieces. |
+| UI | **React + TypeScript + Tailwind** | Most of the visual and math libraries we need (Mafs, KaTeX) are built for the web or React. TypeScript catches contract mistakes between people. | Svelte or Vue: fine, but fewer ready-made pieces. |
 | AI | **Claude Opus 5.5** | Reads screenshots of code, equations, handwriting and diagrams. Structured outputs guarantee valid JSON. Good at following "never reveal the answer". One model means one prompt to tune; speed comes from the `effort` setting. | Other vision models (OpenAI, Google) also work. Use one if sponsors give credits, but stick to a single model. Local models (Ollama) are free and private, but slow on laptops and worse at holding back answers. |
 | Answer checking | **math.js** | The AI can make arithmetic mistakes; a math engine doesn't. math.js checks whether two expressions are equal, takes derivatives and handles units. It's pure JavaScript and small. | SymPy (via Pyodide): stronger algebra, but 10+ MB and slow to start. CortexJS Compute Engine: pairs with MathLive, but newer. |
-| Math display + input | **KaTeX** + **MathLive** | KaTeX renders formulas quickly. MathLive gives students a proper equation input box. | MathJax: more complete, but slower. A plain text box works as a fallback. |
+| Math display + input | **KaTeX** + live preview | KaTeX renders formulas quickly. Students type math as plain text (`x^2 e^x + C`), and math.js turns it into a live KaTeX preview; that's the same syntax the checker reads. | MathLive: a fancier equation box, but more setup and an extra conversion step. MathJax: slower. |
 | Visuals | **SVG + Motion** for data structures, **Mafs** for plots and vectors | We draw from our own `Scene` JSON, so visuals are fast and don't break. Mafs is built for math graphics: graphs and vectors. | D3: more powerful, but much more code. Letting the AI write drawing code: slow and breaks often. |
 | Speech to text | **Deepgram** (streaming) | Fast live transcripts, works the same on both OSes, and detects when you've stopped talking. | whisper.cpp (runs locally, written in C++): free and private, but heavy on laptops and slower. Built-in dictation works differently on each OS. |
 | Text to speech (stretch) | Built-in `speechSynthesis`; **ElevenLabs Flash** for a nicer voice | Free with no setup, or a better voice with very little delay | OpenAI TTS, Cartesia |
-| Storage | **SQLite** (`better-sqlite3`) | One file on the laptop, no server, works offline | A JSON file (simplest fallback). Supabase: only needed if we add accounts or a teacher dashboard. |
+| Storage | **A JSON file** | One file on the laptop, no server, works offline, no native modules to rebuild on Windows | SQLite (`better-sqlite3`): needs native rebuilds. Supabase: only needed if we add accounts or a teacher dashboard. |
 | Flashcards | **ts-fsrs** | A modern spaced-repetition scheduler (decides when each card comes back), and it's tiny | Writing the SM-2 algorithm by hand |
-| Stuck detection | `desktopCapturer` thumbnails + **pixelmatch** + **get-windows** | Runs on the laptop. No AI calls, no cost. | System-wide keyboard hooks: need extra permissions |
+| Stuck detection | `desktopCapturer` thumbnails (96×54 grayscale, our own diff) + window titles | Runs on the laptop. No AI calls, no cost, no extra dependencies. | pixelmatch / get-windows: more dependencies (get-windows is native). System-wide keyboard hooks: need extra permissions. |
 | Packaging | **electron-builder** | Builds the .dmg and .exe from one config | Electron Forge |
 
 ### Why not C++?
@@ -430,7 +333,7 @@ tracing, which is too much for a hackathon.
 - **Hotkeys:** use `CommandOrControl` so one definition works on both OSes. Don't register Esc
   globally; handle it only inside the panel.
 - **Never call `setContentProtection(true)`.** That's Cluely's hiding trick, and we stay visible.
-- **Native modules** like `better-sqlite3` must be rebuilt for Electron
+- **Native modules** (if you add any) must be rebuilt for Electron
   (`electron-builder install-app-deps`). On Windows, if the build fails, install "Desktop
   development with C++" from Visual Studio Build Tools. If it keeps fighting you, switch to a JSON
   file.
@@ -478,9 +381,8 @@ you're stuck."
 
 ## 12. Before the event
 
-- **Check the event rules.** Most hackathons require that code be written during the event. This
-  repo only holds plans; the app goes into `app/` at the event.
-- **Install:** Git, the current Node.js LTS, and an editor. Clone this repo.
+- **Check the event rules.** Most hackathons require that code be written during the event, and this repo's history shows when the app was built.
+- **Install:** Git, the current Node.js LTS, and an editor. Clone this repo, then follow "Run it" in the README.
 - **Accounts and keys:** Anthropic (Ali), Deepgram (Nurassyl), and ElevenLabs if we do the stretch
   goal. Keys go in `app/.env`, never in git.
 - Tell the team which OS your laptop runs. We need at least one Windows tester.

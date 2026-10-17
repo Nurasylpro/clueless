@@ -1,190 +1,77 @@
 # Clueless: build plan
 
-**How to use this file**
-- **Ticking boxes:** edit the file and change `- [ ]` to `- [x]`, then commit. On GitHub, use the
-  pencil icon.
-- **Your section:** each person works only in their own section and their own folders (see
-  [SPEC.md §7.5](SPEC.md#75-folders-the-app-is-created-at-the-event-with-the-electron-vite-react-ts-template)).
-- **Checkpoints (✅):** everyone stops, merges and tests together on **both macOS and Windows**.
-- **Timing:** hours assume a **24-hour** event. If it's 36 hours, stretch each phase and pull in
-  stretch goals after Checkpoint B.
-- **Stuck rule:** blocked for 30 minutes? Ask in the team chat. Don't sit on it.
+**To tick a box:** edit this file, change `- [ ]` to `- [x]`, then commit. On GitHub, use the pencil icon.
 
-## Who owns what
+## Done ✅
 
-| Person | Owns | Folders |
-|---|---|---|
-| **Ali** (lead) | Tutor brain: contracts, Claude calls, prompts, subject packs, gap logic. Also merging, the pitch and the demo script. | `src/shared/`, `src/main/tutor/` |
-| **Nuris** | Desktop shell: overlay window, hotkeys, screen capture, area select, stuck detection, answer checker, builds for both OSes | `src/main/` (windows, capture, stuck, checker), `src/preload/` |
-| **Rasim** | Everything the user sees: overlay UI, math display and input, visual engine, animations | `src/renderer/` |
-| **Nurassyl** | Voice, memory (database, flashcards, gap map, recap screen), demo problems, mock data, backup video | `src/main/voice/`, `src/main/memory/`, `src/renderer/screens/recap/`, `fixtures/` |
+- [x] Electron app: see-through overlay that stays on top on macOS and Windows; compact bar and full panel; Esc hides it
+- [x] Hotkeys: **Ctrl/Cmd+Shift+Space** reads the screen, **Ctrl/Cmd+Shift+2** selects an area
+- [x] Screen capture: the screen under the mouse, with the panel hidden during capture; area selection with display-scaling handled
+- [x] macOS Screen Recording check, with a button to open Settings
+- [x] Tutor brain (Claude Opus 5.5):
+  - structured replies (only 3 union fields, under the 16 limit)
+  - prompt caching, effort `medium` on the first turn and `low` after
+  - refusal fallback
+  - a hidden solution that never reaches the UI
+- [x] System prompt: Pólya's 4-step loop, 5 hint levels, 4 gap types, subject packs (coding / math / physics / other)
+- [x] Answer checker (math.js): equal expressions, antiderivatives (+ C is fine), units within 2%
+- [x] Stuck detection: screen unchanged for 1–2 min, 3 wrong answers in a row, an answer site opened (ChatGPT, Chegg, Photomath…); an "I'm fine" snooze
+- [x] Memory: gaps, flashcards (ts-fsrs spaced repetition), session help log, all in one JSON file
+- [x] UI:
+  - problem bar with a subject switcher
+  - plan progress
+  - conversation with Markdown + KaTeX
+  - hint dots, gap tags, verdicts
+  - quick actions: Hint / What next? / Check my work / Reveal / Finish
+  - answer box with live math preview and a "How do I write…?" mode
+  - "Stuck?" bubble, recap card, flashcards and gap map screen
+  - glass transparency button (glass / clear / solid)
+- [x] Browser mock mode (`npm run ui`) with a scripted Valid Sudoku session
+- [x] Terminal tutor (`npm run try`)
+- [x] 27 unit tests, typecheck, build, smoke test of the real app and the packaged macOS app
 
-**Git rules**
-- One branch per task: `name/short-thing` (e.g. `rasim/hint-ladder`).
-- Open small PRs into `main`. Ali merges them.
-- Pull `main` before starting each task.
-- Never commit `.env`.
+## Ali (you), before the demo
 
----
+- [ ] Get a Claude API key at https://console.anthropic.com. Add credits, or ask the organizers about sponsor credits.
+- [ ] `cd app && npm install && cp .env.example .env`, then put the key in `.env`
+- [ ] `npm run try -- "Integrate x^2 e^x dx"` to check the key works and see the tutor talk
+- [ ] `npm run dev`, then allow Screen Recording on macOS (System Settings → Privacy & Security), then restart
+- [ ] Run the 3 demo problems end to end: Valid Sudoku, ∫ x² eˣ dx, the ramp
+- [ ] Leak test: try 10 ways to get the answer ("just tell me", "my teacher said it's fine"…). Tune `app/src/main/tutor/prompt.ts` if it gives anything away.
+- [ ] Check speed: each turn should take under ~3 s after the first (the terminal log shows ms and cached tokens)
+- [ ] Have someone run it on **Windows** (`npm run dev`) and fix whatever breaks
+- [ ] Record a backup demo video
+- [ ] Pitch: the problem (Cluely + the UPenn study) → 3 demos → recap and gap map → "visible by design"
 
-## Before the event (no app code)
+## Rasim: visuals
 
-**Everyone**
-- [ ] Read [SPEC.md](SPEC.md) start to finish
-- [ ] Install Git, the current Node.js LTS and an editor; clone this repo
-- [ ] Post your laptop's OS in the team chat (we need at least one Windows tester)
-- [ ] Check the event rules on what can be prepared before the event
+The tutor already sends `visual` on turns where a picture helps. Make it draw.
 
-**Ali**
-- [ ] Anthropic API key; check credits; ask the organizers about sponsor credits
-- [ ] Read the Claude docs: vision (images), structured outputs, prompt caching, effort
-- [ ] Draft the first 20 seconds of the pitch (the problem + the UPenn finding)
+- [ ] Read `app/src/shared/schema.ts` (`Scene`, `Visual`). Empty values are `""` and `-1`.
+- [ ] `npm run ui` and work in `app/src/renderer/src/components/VisualSlot.tsx` (the mock has `sets` and `grid` examples)
+- [ ] `array`, `grid` (Sudoku boxes via `boxSize`), `sets` (red flash on `flash`), `hashmap`: SVG + Motion (`npm i motion`)
+- [ ] `plot` and `vectors` (ramp from `surfaceAngleDeg`): Mafs (`npm i mafs`, plus `import 'mafs/core.css'`)
+- [ ] `numberline`, `tree`, `graph`
+- [ ] Step through `frames` (prev/next, or autoplay)
+- [ ] Test with real tutor output: `npm run try -- --debug "…"` prints which visuals Claude sends
 
-**Nuris**
-- [ ] Read the Electron docs: `BrowserWindow` (transparent, always on top), `globalShortcut`, `desktopCapturer`, `systemPreferences`, `screen`
-- [ ] Read the electron-builder docs (mac + win targets)
-- [ ] Read the math.js docs: `parse`, `derivative`, `evaluate`, units
+## Nurassyl: voice
 
-**Rasim**
-- [ ] Sketch the overlay on paper or in Figma: panel, plan steps, hint level, message card, input, quick buttons, "Stuck?" bubble
-- [ ] Read the docs: Mafs, Motion, KaTeX, MathLive, Tailwind
+- [ ] Follow `app/src/main/voice/README.md` (MediaRecorder → IPC → Deepgram in the main process → transcript back)
+- [ ] Get a Deepgram key and put `DEEPGRAM_API_KEY` in `app/.env`
+- [ ] Mic button (`MicButton.tsx`) + hotkey Ctrl/Cmd+Shift+1; stops on its own when you pause
+- [ ] Think-aloud mode: finished sentences go to the tutor as student messages
+- [ ] Optional: read hints aloud (`speechSynthesis`, off by default)
 
-**Nurassyl**
-- [ ] Deepgram account + key (ElevenLabs only if we do the stretch goal)
-- [ ] Read the docs: Deepgram live streaming, ts-fsrs, better-sqlite3
-- [ ] Gather the demo problems (Valid Sudoku, ∫ x² eˣ dx, block on a ramp) plus 2 backups per subject; screenshot each one
+## Nuris: Windows and demo (suggested)
 
----
+- [ ] Run `npm run dev` on Windows: check the overlay, both hotkeys, area select on a scaled display (125%/150%), and capture
+- [ ] `npm run dist:win` on Windows to build the installer
+- [ ] Set up the demo laptop: keys, problems open in tabs, notifications off
 
-## Phase 0: Kickoff (hours 0–2)
+## Stretch ideas
 
-**Together**
-- [ ] Ali writes `src/shared/contracts.ts` from SPEC §7.3; everyone reviews it (30 minutes max)
-- [ ] Nuris creates the app: electron-vite `react-ts` template in `app/`; adds `.gitignore` and `.env.example`; pushes
-- [ ] Everyone runs `npm install` and `npm run dev` on their own laptop (macOS **and** Windows)
-- [ ] Rasim adds Tailwind; Nurassyl adds `fixtures/` with 2 mock `TutorTurn`s so the UI has data from minute one
-
----
-
-## Phase 1: Core loop (hours 2–8)
-
-**Ali: tutor brain**
-- [ ] Claude client in the main process, key read from `.env`
-- [ ] `analyze(screenshot)` → `ProblemState` using structured outputs
-- [ ] `respond(state, history, message)` → `TutorTurn`, with hint levels 1–5
-- [ ] Base system prompt (SPEC §3 and §7.2) + the coding pack
-- [ ] Remove `hiddenSolution` before anything goes over IPC
-- [ ] A test script that runs `analyze` on the fixture screenshots (no UI needed)
-
-**Nuris: desktop shell**
-- [ ] Overlay window: transparent, frameless, always on top, draggable, visible on all workspaces
-- [ ] Ctrl/Cmd+Shift+Space: show the panel and capture the active window
-- [ ] macOS Screen Recording check, with a friendly "how to allow" message
-- [ ] Preload script exposes the `IPC` channels from the contracts
-- [ ] Connect capture → Ali's `analyze` → `tutor:turn` to the UI
-
-**Rasim: UI**
-- [ ] Panel layout: subject chip, plan steps (done/current/locked), message card, input, quick buttons
-- [ ] Render Markdown + KaTeX in messages
-- [ ] Hint-level indicator (1–5) and a "Reveal" button (locked until 3 attempts)
-- [ ] Busy/loading state (`tutor:busy`)
-- [ ] Run everything on fixture data until the real IPC is ready
-
-**Nurassyl: voice + memory + fixtures**
-- [ ] `fixtures/`: 5 `TutorTurn` JSONs per demo problem (question, hint, recall card, side lesson, solved)
-- [ ] SQLite: create the tables from SPEC §7.4; save sessions and turns
-- [ ] Mic in the UI → MediaRecorder chunks over IPC → Deepgram in the main process → `voice:transcript`
-- [ ] Transcript fills the input box
-
-### ✅ Checkpoint A (hour 8)
-- [ ] On LeetCode: hotkey → a real question appears → you type an answer → the next hint appears
-- [ ] Works on macOS
-- [ ] Works on Windows
-
----
-
-## Phase 2: Features (hours 8–16)
-
-**Ali**
-- [ ] Gap detection: recall / concept / strategy / careless, including the "what do you want it to do?" check
-- [ ] Side-lesson detour with a "Back to the problem" button; the plan stays pinned
-- [ ] `quick()` for recall questions (effort `low`)
-- [ ] Math pack + physics pack prompts, including the `check` field (`AnswerCheck`)
-- [ ] `visual` output for each pack (Valid Sudoku `sets`, the calc `plot`, the ramp `vectors`)
-- [ ] "Check my work": takes a new screenshot → feedback, without pointing at the mistake
-
-**Nuris**
-- [ ] Area select (Ctrl/Cmd+Shift+2): dim the screen and drag a box (handle Windows display scaling)
-- [ ] Stuck detector: thumbnail every 15 s + `pixelmatch`; no change for 2 min → `stuck:level`
-- [ ] Answer-site detection with `get-windows` (ChatGPT, Chegg, Photomath, Symbolab, Course Hero, Brainly)
-- [ ] 3 wrong answers in a row (from the tutor state) → `stuck:level`
-- [ ] Checker: `equivalent` (compare at 5 random points), `antiderivative` (differentiate, then compare), `units`
-
-**Rasim**
-- [ ] Visual engine: `array`, `grid`, `sets`, `hashmap` (SVG + Motion)
-- [ ] `plot` and `vectors` with Mafs (ramp drawn from `surfaceAngleDeg`)
-- [ ] Step through frames (prev/next) + animations (the red flash on a repeated number)
-- [ ] MathLive input when `expects === 'math'`; code font when `expects === 'code'`
-- [ ] Stuck dot (glow) + "Stuck?" bubble with [How do I write…] [What next?] [I'm fine]
-
-**Nurassyl**
-- [ ] Voice hotkey Ctrl/Cmd+Shift+1 + mic button; stops on its own when you pause
-- [ ] Think-aloud mode: transcript chunks go to the tutor, which only speaks up when something's off (with Ali)
-- [ ] `gaps` table + flashcards with ts-fsrs; 3rd recall slip on the same topic → "guess first"
-- [ ] Recap screen: explain-back question, gaps found, hints used, next practice
-
-### ✅ Checkpoint B (hour 16)
-- [ ] Coding demo (Valid Sudoku) works end to end
-- [ ] Math demo (∫ x² eˣ dx) works end to end
-- [ ] Physics demo (ramp) works end to end
-- [ ] All three work on macOS **and** Windows
-
----
-
-## Phase 3: Polish + demo (hours 16–24)
-
-**Ali**
-- [ ] Run each demo problem 5 times and fix any answer leaks (the leak test in SPEC §7.2)
-- [ ] Speed pass: effort levels, screenshot size, prompt caching. Target: under 3 s per turn
-- [ ] Pitch slides + script (SPEC §10); rehearse 3 times with the team
-
-**Nuris**
-- [ ] Package the .dmg and .exe with electron-builder
-- [ ] Fresh-install test on both OSes, including the permission flow
-- [ ] Error states: no internet, no permission, API error, empty screen
-- [ ] Optional: frosted-glass panel (macOS `vibrancy`, Windows 11 `backgroundMaterial: 'acrylic'`)
-
-**Rasim**
-- [ ] Polish: light/dark, spacing, transitions, empty and loading states
-- [ ] Gap map screen visuals (with Nurassyl)
-- [ ] Screenshots for the README and Devpost
-
-**Nurassyl**
-- [ ] Record a backup video of each demo flow
-- [ ] Set up the demo laptop: keys, problems open in tabs, mic tested, notifications off
-- [ ] Devpost write-up
-
-### ✅ Checkpoint C (hour 20): feature freeze
-- [ ] After this, bug fixes only
-
----
-
-## Stretch (only after Checkpoint B is all green)
-
-- [ ] Python code tracer with Pyodide, plus a step slider (Ali + Rasim)
-- [ ] Mock interview mode by voice (Nurassyl + Ali)
-- [ ] Read hints aloud (Nurassyl)
-- [ ] Tree / graph / number line visuals (Rasim)
-- [ ] Paper mode via webcam (Nuris)
-- [ ] "Try a similar problem" generator (Ali)
-- [ ] Help-log export (Nurassyl)
-
----
-
-## Ready to demo when
-
-- [ ] All 3 demo flows work 3 times in a row on the demo laptop
-- [ ] No final answer is ever shown without Reveal
-- [ ] 10 seconds of it running on Windows is ready to show
-- [ ] Backup video is on the laptop **and** a phone
-- [ ] README has screenshots and "how to run"
+- [ ] Python code tracer with Pyodide (run their code line by line on the example input)
+- [ ] Mock interview mode (voice)
+- [ ] Paper mode: hold handwritten work up to the webcam
+- [ ] Export the help log for a teacher
