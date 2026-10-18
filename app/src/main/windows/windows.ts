@@ -1,13 +1,13 @@
 // The floating overlay panel and the full-screen "select an area" window.
 import { app, BrowserWindow, screen, shell, type Display } from 'electron'
 import { join } from 'node:path'
-import type { Rect, WindowMode } from '../../shared/contracts'
+import type { Rect } from '../../shared/contracts'
 
-export const PANEL_SIZE: Record<WindowMode, { width: number; height: number }> = {
-  expanded: { width: 440, height: 720 },
-  compact: { width: 440, height: 84 },
-  wide: { width: 860, height: 720 } // explain-mode animation pane + the conversation
-}
+/** The window wraps the panel (plus an 8px margin for its shadow) and follows its height. */
+export const PANEL_WIDTH = 416
+const MIN_WIDTH = 320
+const MAX_WIDTH = 960
+const MARGIN = 16
 
 // macOS: a 'panel' window floats over full-screen apps and appears on every Space, and it takes
 // keyboard focus without activating the app, so a full-screen browser isn't switched away from.
@@ -28,16 +28,15 @@ export function loadRenderer(win: BrowserWindow, hash = ''): void {
 
 export function createOverlay(): BrowserWindow {
   const work = screen.getPrimaryDisplay().workArea
-  const { width, height } = PANEL_SIZE.expanded
   const win = new BrowserWindow({
-    width,
-    height: Math.min(height, work.height - 32),
-    x: work.x + work.width - width - 16,
+    width: PANEL_WIDTH,
+    height: 180, // the panel reports its real height right after it renders
+    x: work.x + work.width - PANEL_WIDTH - 16,
     y: work.y + 16,
     title: 'Clueless',
     show: false,
     frame: false,
-    transparent: true, // transparent windows can't be resized by dragging: we switch between fixed sizes
+    transparent: true, // transparent windows can't be resized natively: the panel's own grips resize it
     resizable: false,
     maximizable: false,
     fullscreenable: false,
@@ -50,8 +49,8 @@ export function createOverlay(): BrowserWindow {
   // 'screen-saver' keeps it above full-screen windows (and above browsers in F11 on Windows).
   win.setAlwaysOnTop(true, 'screen-saver')
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
-  // Never call win.setContentProtection(true): that's how Cluely hides from screen share.
-  // Clueless stays visible by design.
+  // Don't call win.setContentProtection(true): it hides the window from screen sharing, and
+  // Clueless should stay visible.
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//.test(url)) void shell.openExternal(url)
     return { action: 'deny' }
@@ -60,43 +59,27 @@ export function createOverlay(): BrowserWindow {
   return win
 }
 
-export function setPanelMode(win: BrowserWindow, mode: WindowMode): void {
-  const { width, height } = PANEL_SIZE[mode]
-  const old = win.getBounds()
-  const work = screen.getDisplayMatching(old).workArea
-  // Keep the right edge in place, so going wide grows the panel to the left.
-  const x = Math.max(work.x, Math.min(old.x + old.width - width, work.x + work.width - width))
-  win.setBounds({ x, y: old.y, width, height: Math.min(height, work.height - 32) })
+/** Make the window exactly as tall as the panel, keeping it on screen. */
+export function fitPanelHeight(win: BrowserWindow, panelHeight: number): void {
+  if (!Number.isFinite(panelHeight)) return
+  const [x, y] = win.getPosition()
+  const work = screen.getDisplayNearestPoint({ x, y }).workArea
+  const height = Math.max(48, Math.min(Math.round(panelHeight) + MARGIN, work.height - 16))
+  const [width, current] = win.getSize()
+  if (Math.abs(current - height) < 2) return
+  const top = Math.max(work.y, Math.min(y, work.y + work.height - height)) // grow downward, never off-screen
+  win.setBounds({ x, y: top, width, height })
 }
 
-// ---------- code-mode animation ----------
-
-/** A see-through, click-through layer over `display` that draws animations on the student's code. */
-export function createStage(display: Display): BrowserWindow {
-  const win = new BrowserWindow({
-    ...display.bounds,
-    show: false,
-    frame: false,
-    transparent: true,
-    resizable: false,
-    movable: false,
-    minimizable: false,
-    maximizable: false,
-    fullscreenable: false,
-    focusable: false, // never steals focus from the student's editor or the panel
-    enableLargerThanScreen: true,
-    hasShadow: false,
-    skipTaskbar: true,
-    alwaysOnTop: true,
-    backgroundColor: '#00000000',
-    ...PANEL_TYPE,
-    webPreferences
-  })
-  win.setIgnoreMouseEvents(true) // clicks go through to the code (and the panel) underneath
-  win.setAlwaysOnTop(true, 'screen-saver')
-  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
-  loadRenderer(win, 'stage')
-  return win
+/** The student dragged a side edge. `anchor` is the edge that stays put; the window stays on screen. */
+export function resizePanelWidth(win: BrowserWindow, width: number, anchor: 'left' | 'right'): void {
+  if (!Number.isFinite(width)) return
+  const b = win.getBounds()
+  const work = screen.getDisplayNearestPoint({ x: b.x, y: b.y }).workArea
+  const w = Math.round(Math.max(MIN_WIDTH, Math.min(width, MAX_WIDTH, work.width - 16)))
+  if (w === b.width) return
+  const x = anchor === 'right' ? b.x + b.width - w : b.x
+  win.setBounds({ x: Math.max(work.x, Math.min(x, work.x + work.width - w)), y: b.y, width: w, height: b.height })
 }
 
 // ---------- area selection ----------

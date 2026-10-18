@@ -17,8 +17,11 @@ const api: CluelessApi = {
   askText: (text) => ipcRenderer.send(IPC.askText, text),
   send: (input) => ipcRenderer.send(IPC.send, input),
   action: (action) => ipcRenderer.send(IPC.action, action),
+  step: (id, intent) => ipcRenderer.send(IPC.step, { id, intent }),
   setSubject: (subject) => ipcRenderer.send(IPC.setSubject, subject),
   setWindowMode: (mode) => ipcRenderer.send(IPC.windowMode, mode),
+  fitHeight: (px) => ipcRenderer.send(IPC.fitHeight, px),
+  resizeWidth: (width, anchor) => ipcRenderer.send(IPC.resizeWidth, { width, anchor }),
   hide: () => ipcRenderer.send(IPC.hide),
   quit: () => ipcRenderer.send(IPC.quit),
   openScreenSettings: () => ipcRenderer.send(IPC.openScreenSettings),
@@ -26,9 +29,15 @@ const api: CluelessApi = {
   rateCard: (id, rating) => ipcRenderer.invoke(IPC.rateCard, { id, rating }),
   areaDone: (rect) => ipcRenderer.send(IPC.areaDone, rect),
   areaCancel: () => ipcRenderer.send(IPC.areaCancel),
-  playOnScreen: (play) => ipcRenderer.send(IPC.stagePlay, play),
-  stopOnScreen: () => ipcRenderer.send(IPC.stageStop),
-  onStage: (cb) => listen(IPC.stageShow, cb)
+  micAccess: () => ipcRenderer.invoke(IPC.voiceMicAccess),
+  voiceStart: (id) => ipcRenderer.send(IPC.voiceStart, id),
+  voiceAudio: (id, chunk) => ipcRenderer.send(IPC.voiceAudio, { id, chunk }),
+  voiceStop: (id) => ipcRenderer.send(IPC.voiceStop, id),
+  voiceCancel: (id) => ipcRenderer.send(IPC.voiceCancel, id),
+  onVoiceTranscript: (cb) => listen(IPC.voiceTranscript, cb),
+  onVoiceState: (cb) => listen(IPC.voiceState, cb),
+  onVoiceToggle: (cb) => listen(IPC.voiceToggle, cb),
+  tts: (req) => ipcRenderer.invoke(IPC.voiceTts, req)
 }
 
 contextBridge.exposeInMainWorld('clueless', api)

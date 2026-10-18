@@ -67,40 +67,7 @@ export interface TutorReplyT {
 export type ProblemView = Omit<ProblemInfo, 'hiddenSolution'>
 
 /** A tutor turn as shown in the UI: the answer-check reference is stripped out. */
-export type TurnView = Omit<TutorTurn, 'check'> & {
-  checkKind: AnswerCheck['kind'] | null
-  animation: TurnAnimation | null // set when the student asked for this turn with an animate button
-}
-
-// ---------- animation ----------
-
-/** What the student asked to animate (the Animate button's three options). */
-export type AnimateTarget = 'code' | 'problem' | 'question'
-
-/** A box the student dragged on one display. rect is in DIP, relative to the display's top-left. */
-export interface ScreenArea {
-  displayId: number
-  rect: Rect
-}
-
-/** How a turn's visual plays. 'code' with an area draws over the student's code on screen;
- *  everything else plays inside the panel (explain mode). */
-export interface TurnAnimation {
-  target: AnimateTarget
-  area: ScreenArea | null
-}
-
-/** UI -> main: play a visual over the student's code. `nonce` changes on every replay. */
-export interface StagePlay {
-  visual: Visual
-  area: ScreenArea
-  nonce: number
-}
-
-/** main -> stage window: what to draw. `avoid` is the panel, in the same display coordinates. */
-export interface StageShow extends StagePlay {
-  avoid: Rect | null
-}
+export type TurnView = Omit<TutorTurn, 'check'> & { checkKind: AnswerCheck['kind'] | null }
 
 export interface CheckResult {
   status: 'match' | 'mismatch' | 'missing_units' | 'wrong_units' | 'unparseable'
@@ -157,12 +124,11 @@ export type UserAction =
   | 'finish'
   | 'new'
   | 'retry'
-  | 'animate_code'
-  | 'animate_problem'
-  | 'animate_question'
 
-/** 'wide' = expanded with the animation pane next to the conversation (explain mode). */
-export type WindowMode = 'compact' | 'expanded' | 'wide'
+/** The student clicked a plan step: stuck on the current one, back to a done one, or "I've done this" on a locked one. */
+export type StepIntent = 'stuck' | 'revisit' | 'claim'
+
+export type WindowMode = 'compact' | 'expanded'
 
 export interface AppStatus {
   platform: string
@@ -224,8 +190,11 @@ export const IPC = {
   askText: 'user:ask-text', // the problem typed or pasted as text
   send: 'user:send', // { text, as }
   action: 'user:action', // UserAction
+  step: 'user:step', // { id, intent }: a plan step was clicked
   setSubject: 'user:subject', // Subject
   windowMode: 'window:mode', // WindowMode
+  fitHeight: 'window:fit-height', // number: the panel's height in px; the window follows it
+  resizeWidth: 'window:resize-width', // { width, anchor }: the student dragged a side edge
   hide: 'window:hide',
   quit: 'app:quit',
   openScreenSettings: 'app:open-screen-settings',
@@ -236,15 +205,44 @@ export const IPC = {
   getSession: 'session:get',
   getMemory: 'memory:get',
   rateCard: 'memory:rate', // { id, rating } -> MemoryView
-  // Code-mode animation: a click-through window over the student's code
-  stagePlay: 'stage:play', // UI -> main: StagePlay
-  stageStop: 'stage:stop', // UI -> main
-  stageShow: 'stage:show', // main -> stage window: StageShow | null
-  // Voice (reserved for the voice feature)
-  voiceToggle: 'voice:toggle',
-  voiceAudio: 'voice:audio', // ArrayBuffer chunk from MediaRecorder (webm/opus)
-  voiceTranscript: 'voice:transcript' // main -> UI: { text, final }
+  // Voice: one recording ("utterance") at a time, identified by an id the UI makes up
+  voiceToggle: 'voice:toggle', // main -> UI: the voice hotkey was pressed
+  voiceStart: 'voice:start', // UI -> main: utterance id
+  voiceAudio: 'voice:audio', // UI -> main: { id, chunk } (MediaRecorder webm/opus bytes)
+  voiceStop: 'voice:stop', // UI -> main: utterance id; finish and send the final transcript
+  voiceCancel: 'voice:cancel', // UI -> main: utterance id; drop it, no transcript
+  voiceTranscript: 'voice:transcript', // main -> UI: VoiceTranscript
+  voiceState: 'voice:state', // main -> UI: VoiceStateEvent
+  voiceMicAccess: 'voice:mic-access', // UI -> main (invoke): ask the OS for the microphone -> boolean
+  voiceTts: 'voice:tts' // UI -> main (invoke): TtsRequest -> TtsResult (ElevenLabs audio)
 } as const
+
+// ---------- voice ----------
+
+/** Live transcript of one utterance. `final` arrives at most once, when the student has paused. */
+export interface VoiceTranscript {
+  id: string
+  text: string // everything heard so far
+  interim: string // the end of `text` that may still change ("" once final)
+  final: boolean
+}
+
+/** Deepgram connection state for one utterance. 'closed' always comes last. */
+export type VoiceStateEvent =
+  | { id: string; state: 'listening' }
+  | { id: string; state: 'closed'; reason: 'done' | 'no-speech' | 'cancelled' }
+  | { id: string; state: 'error'; message: string }
+
+/** One piece of a reply to read aloud; the neighbouring text keeps the intonation natural. */
+export interface TtsRequest {
+  text: string
+  previousText?: string
+  nextText?: string
+}
+
+export type TtsResult =
+  | { ok: true; audio: ArrayBuffer; mime: string }
+  | { ok: false; reason: 'no-key' | 'error'; message: string }
 
 /** The API the preload script exposes to the UI as `window.clueless`. */
 export interface CluelessApi {
@@ -256,8 +254,12 @@ export interface CluelessApi {
   askText(text: string): void
   send(input: { text: string; as: InputKind }): void
   action(action: UserAction): void
+  step(id: number, intent: StepIntent): void
   setSubject(subject: Subject): void
   setWindowMode(mode: WindowMode): void
+  fitHeight(px: number): void
+  /** Set the window width; `anchor` is the edge that stays put. */
+  resizeWidth(width: number, anchor: 'left' | 'right'): void
   hide(): void
   quit(): void
   openScreenSettings(): void
@@ -265,9 +267,16 @@ export interface CluelessApi {
   rateCard(id: string, rating: CardRating): Promise<MemoryView>
   areaDone(rect: Rect): void
   areaCancel(): void
-  playOnScreen(play: StagePlay): void
-  stopOnScreen(): void
-  onStage(cb: (show: StageShow | null) => void): () => void
+  // voice
+  micAccess(): Promise<boolean>
+  voiceStart(id: string): void
+  voiceAudio(id: string, chunk: ArrayBuffer): void
+  voiceStop(id: string): void
+  voiceCancel(id: string): void
+  onVoiceTranscript(cb: (t: VoiceTranscript) => void): () => void
+  onVoiceState(cb: (e: VoiceStateEvent) => void): () => void
+  onVoiceToggle(cb: () => void): () => void
+  tts(req: TtsRequest): Promise<TtsResult>
 }
 
 // ---------- the island (the floating pill: highlight -> Ask -> text, then the animation) ----------

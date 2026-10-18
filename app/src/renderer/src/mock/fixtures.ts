@@ -1,6 +1,6 @@
 // A scripted Valid Sudoku session for `npm run ui` (browser mode, no Electron, no API key).
 // The visual teammate can use the `visual` examples here to build the visual engine.
-import type { AnimateTarget, GapRecord, ProblemView, Recap, Rect, Scene, TurnView } from '../../../shared/contracts'
+import type { GapRecord, ProblemView, Recap, TurnView } from '../../../shared/contracts'
 
 const plan = (current: number): TurnView['plan'] =>
   [
@@ -22,8 +22,7 @@ const base = {
   expects: 'text',
   choices: [],
   visual: null,
-  checkKind: null,
-  animation: null
+  checkKind: null
 } satisfies Partial<TurnView>
 
 export const MOCK_PROBLEM: ProblemView = {
@@ -40,7 +39,15 @@ export const MOCK_TURNS: TurnView[] = [
   {
     ...base,
     kind: 'question',
-    message: 'Before any code: what **3 rules** must a valid board follow?',
+    message: 'Sudoku validator. What’s tripping you up?',
+    expects: 'choice',
+    choices: [
+      'Don’t know where to start',
+      'Not sure what makes a board valid',
+      'Stuck on checking the 3×3 boxes',
+      'Forgot how to make a list of sets',
+      'My output is wrong'
+    ],
     plan: plan(1)
   },
   {
@@ -109,8 +116,7 @@ export const MOCK_TURNS: TurnView[] = [
           bins: emptyBins.map((b, i) => (i === 0 ? { ...b, items: ['5', '3', '7', '5'] } : b)),
           flash: 0
         }
-      ],
-      focus: []
+      ]
     }
   },
   {
@@ -131,8 +137,7 @@ export const MOCK_TURNS: TurnView[] = [
           highlight: [{ r: 4, c: 7 }],
           boxSize: 3
         }
-      ],
-      focus: []
+      ]
     }
   },
   {
@@ -183,106 +188,3 @@ export const MOCK_GAPS: GapRecord[] = [
   { id: 'g4', subject: 'math', type: 'careless_slip', topic: 'sign errors when distributing a minus', timesSeen: 1, firstSeen: '2026-10-16T10:00:00Z', lastSeen: '2026-10-16T10:00:00Z' },
   { id: 'g5', subject: 'physics', type: 'concept_gap', topic: 'components of gravity on a ramp', timesSeen: 1, firstSeen: '2026-10-15T10:00:00Z', lastSeen: '2026-10-15T10:00:00Z' }
 ]
-
-// ---------- animations (the Animate button) ----------
-
-/** Where MockDesktop's code sits in the browser page: 40px padding, 18 lines of 28px. */
-export const MOCK_CODE_AREA: Rect = { x: 40, y: 40, width: 640, height: 18 * 28 }
-const line = (from: number, to = from): { top: number; bottom: number } => ({ top: (from - 1) / 18, bottom: to / 18 })
-
-// LeetCode 36, example 2: the top-left 8 repeats in box 0 (row 0 and row 2).
-const BOARD = [
-  ['8', '3', '', '', '7', '', '', '', ''],
-  ['6', '', '', '1', '9', '5', '', '', ''],
-  ['', '9', '8', '', '', '', '', '6', ''],
-  ['8', '', '', '', '6', '', '', '', '3'],
-  ['4', '', '', '8', '', '3', '', '', '1'],
-  ['7', '', '', '', '2', '', '', '', '6'],
-  ['', '6', '', '', '', '', '2', '8', ''],
-  ['', '', '', '4', '1', '9', '', '', '5'],
-  ['', '', '', '', '8', '', '', '7', '9']
-]
-
-/** The boxes bins after reading the board up to (row, col), skipping '.' cells. */
-function boxesUpTo(row: number, col: number): Scene {
-  const bins = Array.from({ length: 9 }, (_, i) => ({ label: `boxes[${i}]`, items: [] as string[] }))
-  let flash = -1
-  outer: for (let r = 0; r < 9; r++) {
-    for (let c = 0; c < 9; c++) {
-      if (r > row || (r === row && c > col)) break outer
-      const v = BOARD[r][c]
-      if (!v) continue
-      const b = Math.floor(r / 3) * 3 + Math.floor(c / 3)
-      flash = bins[b].items.includes(v) ? b : -1
-      bins[b].items.push(v)
-    }
-  }
-  return { type: 'sets', name: 'boxes', bins, flash }
-}
-
-const boardUpTo = (rows: number, highlight: { r: number; c: number }[] = []): Scene => ({
-  type: 'grid',
-  name: 'board',
-  cells: BOARD.map((r, i) => (i < rows ? r : r.map(() => ''))),
-  highlight,
-  boxSize: 3
-})
-
-const seenFrame = (i: number): Scene => {
-  const row = ['5', '3', '7', '5']
-  const seen = [...new Set(row.slice(0, i))]
-  const repeat = seen.includes(row[i])
-  return {
-    type: 'array',
-    name: repeat ? `seen = {${seen.join(', ')}} → ${row[i]} is already in it!` : `seen = {${seen.join(', ')}}`,
-    items: row,
-    highlight: repeat ? [row.indexOf(row[i]), i] : [i],
-    pointers: [{ name: 'i', index: i }]
-  }
-}
-
-/** What the mock tutor says for each Animate option (text first, then the student plays it). */
-export const MOCK_ANIMATIONS: Record<AnimateTarget, Omit<TurnView, 'plan'>> = {
-  code: {
-    ...base,
-    kind: 'hint',
-    expects: 'code',
-    message:
-      'Here’s your loop running on **Example 2**. Watch `boxes`: every digit drops into the box its cell belongs to. Keep an eye on `boxes[0]` near the end. What should your code do at that moment?',
-    visual: {
-      caption: 'boxes, while reading Example 2',
-      frames: [
-        boxesUpTo(-1, 0),
-        boxesUpTo(0, 0),
-        boxesUpTo(0, 1),
-        boxesUpTo(0, 4),
-        boxesUpTo(1, 0),
-        boxesUpTo(1, 5),
-        boxesUpTo(2, 1),
-        boxesUpTo(2, 2)
-      ],
-      focus: [line(5), line(9, 12), line(17), line(17), line(17), line(17), line(17), line(13, 14)]
-    },
-    animation: { target: 'code', area: { displayId: 0, rect: MOCK_CODE_AREA } }
-  },
-  problem: {
-    ...base,
-    kind: 'question',
-    message:
-      'This is **Example 2** from the problem, filled in row by row. It’s Example 1 with one change in the top-left. When it’s done, look at the top-left 3×3 box. Why is the expected output `false`?',
-    visual: {
-      caption: 'Example 2',
-      frames: [boardUpTo(0), boardUpTo(3), boardUpTo(6), boardUpTo(9), boardUpTo(9, [{ r: 0, c: 0 }, { r: 2, c: 2 }])],
-      focus: []
-    },
-    animation: { target: 'problem', area: null }
-  },
-  question: {
-    ...base,
-    kind: 'question',
-    message:
-      'A **set** only remembers *whether* it has seen something. Walk along the row and add each digit. Watch what happens when `5` comes back. So for Sudoku, do you need counts, or just seen-or-not?',
-    visual: { caption: 'A set remembers what it has seen', frames: [0, 1, 2, 3].map(seenFrame), focus: [] },
-    animation: { target: 'question', area: null }
-  }
-}

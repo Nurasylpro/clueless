@@ -49,7 +49,7 @@ export function AreaSelector() {
     >
       {rect ? (
         <div
-          className="absolute rounded-sm border-2 border-amber-400"
+          className="absolute rounded-sm border-2 border-claude-500"
           style={{
             left: rect.x,
             top: rect.y,

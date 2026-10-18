@@ -1,7 +1,7 @@
 {
   "name": "clueless",
   "version": "0.1.0",
-  "description": "Cluely gives you answers. Clueless gives you clues.",
+  "description": "A small study helper that walks you through problems with hints instead of answers.",
   "main": "./out/main/index.js",
   "author": "Clueless team",
   "private": true,

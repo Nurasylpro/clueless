@@ -98,13 +98,7 @@ export const Scene = z.discriminatedUnion('type', [
   })
 ])
 
-export const Visual = z.object({
-  caption: z.string(),
-  frames: z.array(Scene), // [] = no visual
-  // Code animations only: per frame, the code lines it's about, as fractions (0..1) of the height
-  // of the area the student selected. [] for everything else.
-  focus: z.array(z.object({ top: z.number(), bottom: z.number() }))
-})
+export const Visual = z.object({ caption: z.string(), frames: z.array(Scene) }) // frames [] = no visual
 
 // ---------- the reply ----------
 

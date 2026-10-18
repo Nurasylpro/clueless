@@ -4,15 +4,15 @@ import { randomUUID } from 'node:crypto'
 import type {
   AnswerCheck,
   InputKind,
+  PlanStep,
   ProblemInfo,
-  ScreenArea,
   SessionView,
+  StepIntent,
   StuckState,
   Subject,
   ThreadItem,
   TutorReplyT,
   TutorTurn,
-  TurnAnimation,
   TurnView,
   UserAction
 } from '../shared/contracts'
@@ -22,11 +22,13 @@ import { TutorError, type ImageInput, type SendInput, type TutorLike } from './t
 
 export const REVEAL_AFTER_ATTEMPTS = 3
 
-/** "Animate my code": the student dragged a box around their code. */
-export interface AreaCapture {
-  screen: ImageInput // the whole display, for context
-  crop: ImageInput // just the selected area
-  area: ScreenArea
+/** Used when Claude never names the problem. The student can still fix the subject in the UI. */
+const FALLBACK_PROBLEM: ProblemInfo = {
+  subject: 'other',
+  title: 'Your problem',
+  summary: '',
+  language: null,
+  hiddenSolution: ''
 }
 
 export interface ControllerDeps {
@@ -35,8 +37,6 @@ export interface ControllerDeps {
   memory: MemoryStore
   /** Capture the screen for "Check my work". */
   captureScreen(): Promise<ImageInput | null>
-  /** Let the student drag a box around their code and capture it. null = cancelled. */
-  captureArea(): Promise<AreaCapture | null>
   emit(view: SessionView | null): void
   stuck: {
     start(): Promise<void> | void
@@ -51,6 +51,7 @@ export class SessionController {
   private view: SessionView | null = null
   private tutor: TutorLike | null = null
   private problem: ProblemInfo | null = null
+  private plan: PlanStep[] = [] // with locked steps' text, which the UI never gets
   private pendingCheck: AnswerCheck | null = null
   private pendingNotes: string[] = []
   private lastFailed: (() => Promise<void>) | null = null
@@ -70,6 +71,7 @@ export class SessionController {
       const tutor = this.deps.makeTutor()
       this.tutor = tutor
       this.problem = null
+      this.plan = []
       this.pendingCheck = null
       this.pendingNotes = []
       this.recorded = false
@@ -83,7 +85,10 @@ export class SessionController {
         const reply = await this.call('Reading your screen…', () =>
           tutor.start({ ...input, history: this.deps.memory.historySummary() })
         )
-        if (reply) this.applyReply(reply)
+        if (!reply) return
+        // Still no problem after the tutor's retry: fill in a stand-in so the session (answer box,
+        // buttons, actions) works anyway instead of getting stuck without them.
+        this.applyReply(reply.problem ? reply : { ...reply, problem: { ...FALLBACK_PROBLEM } })
       }
       await this.attempt(run)
     })
@@ -153,27 +158,27 @@ export class SessionController {
           return this.attempt(() => this.round({ tag: 'REVEAL', notes: this.takeNotes() }))
         case 'finish':
           return this.attempt(() => this.round({ tag: 'RECAP', notes: this.takeNotes() }, 'Writing your recap…'))
-        case 'animate_code': {
-          const shot = await this.deps.captureArea()
-          if (!shot) return // the student cancelled the selection
-          const animation: TurnAnimation = { target: 'code', area: shot.area }
-          return this.attempt(() =>
-            this.round(
-              { tag: 'ANIMATE CODE', image: shot.screen, crop: shot.crop, notes: this.takeNotes() },
-              'Getting the animation ready…',
-              animation
-            )
-          )
-        }
-        case 'animate_problem':
-        case 'animate_question': {
-          const target = action === 'animate_problem' ? 'problem' : 'question'
-          const tag = action === 'animate_problem' ? 'ANIMATE PROBLEM' : 'ANIMATE QUESTION'
-          return this.attempt(() =>
-            this.round({ tag, notes: this.takeNotes() }, 'Getting the animation ready…', { target, area: null })
-          )
-        }
       }
+    })
+  }
+
+  /** The student clicked a plan step. Each intent only applies to steps in the matching state. */
+  step(id: number, intent: StepIntent): Promise<void> {
+    return this.enqueue(async () => {
+      const view = this.view
+      const index = this.plan.findIndex((s) => s.id === id)
+      const step = this.plan[index]
+      if (!view || !this.tutor || !this.problem || !step || view.recap) return
+      if (step.status !== STEP_STATUS[intent]) return
+      this.deps.stuck.noteActivity()
+
+      const n = index + 1
+      const said =
+        intent === 'stuck' ? `Stuck on step ${n}` : intent === 'revisit' ? `Back to step ${n}` : `I think I've done step ${n}`
+      view.thread.push({ id: randomUUID(), role: 'student', text: said, as: 'text', check: null, at: Date.now() })
+      this.emit()
+      const input: SendInput = { tag: STEP_TAG[intent], text: `step ${n}: ${step.text}`, notes: this.takeNotes() }
+      await this.attempt(() => this.round(input, intent === 'stuck' ? 'Thinking of a hint…' : 'Thinking…'))
     })
   }
 
@@ -203,11 +208,11 @@ export class SessionController {
 
   // ---------- internals ----------
 
-  private async round(input: SendInput, busy = 'Thinking…', animation: TurnAnimation | null = null): Promise<void> {
+  private async round(input: SendInput, busy = 'Thinking…'): Promise<void> {
     const tutor = this.tutor
     if (!tutor) return
     const reply = await this.call(busy, () => tutor.send(input))
-    if (reply) this.applyReply(reply, animation)
+    if (reply) this.applyReply(reply)
   }
 
   private async attempt(run: () => Promise<void>): Promise<void> {
@@ -237,7 +242,7 @@ export class SessionController {
     return reply
   }
 
-  private applyReply(reply: TutorReplyT, animation: TurnAnimation | null = null): void {
+  private applyReply(reply: TutorReplyT): void {
     const view = this.view
     if (!view) return
     const turn = reply.turn
@@ -257,7 +262,10 @@ export class SessionController {
     if (turn.hintLevel > 0) view.hintsUsed++
     view.revealAllowed = view.attempts >= REVEAL_AFTER_ATTEMPTS
     if (turn.kind === 'solved') view.solved = true
-    if (turn.plan.length) view.plan = turn.plan
+    if (turn.plan.length) {
+      this.plan = turn.plan
+      view.plan = hideLocked(turn.plan)
+    }
     view.expects = turn.expects
     view.choices = turn.choices
     this.pendingCheck = turn.check
@@ -265,7 +273,7 @@ export class SessionController {
     if (turn.gap && this.problem) this.deps.memory.recordGap(this.problem.subject, turn.gap)
 
     const itemId = randomUUID()
-    view.thread.push({ id: itemId, role: 'tutor', turn: toTurnView(turn, animation), at: Date.now() })
+    view.thread.push({ id: itemId, role: 'tutor', turn: toTurnView(turn), at: Date.now() })
 
     if (reply.recap && this.problem) {
       const subject = this.problem.subject
@@ -331,11 +339,18 @@ export class SessionController {
   }
 }
 
-export function toTurnView(turn: TutorTurn, animation: TurnAnimation | null = null): TurnView {
+export function toTurnView(turn: TutorTurn): TurnView {
   const { check, ...rest } = turn
-  // "I can't animate this." comes back without a visual: nothing to play.
-  return { ...rest, checkKind: check?.kind ?? null, animation: turn.visual ? animation : null }
+  return { ...rest, plan: hideLocked(turn.plan), checkKind: check?.kind ?? null }
 }
+
+/** Steps the student hasn't reached would give the strategy away: the UI gets them without text. */
+function hideLocked(plan: PlanStep[]): PlanStep[] {
+  return plan.map((s) => (s.status === 'locked' ? { ...s, text: '' } : s))
+}
+
+const STEP_STATUS = { stuck: 'current', revisit: 'done', claim: 'locked' } as const
+const STEP_TAG = { stuck: 'STEP STUCK', revisit: 'STEP REVISIT', claim: 'STEP CLAIM' } as const
 
 function emptyView(): SessionView {
   return {

@@ -1,6 +1,17 @@
 @import 'tailwindcss';
 
 @theme {
+  /* Claude orange (#D97757) and its tints */
+  --color-claude-50: #fbf2ee;
+  --color-claude-100: #f7e1d8;
+  --color-claude-200: #efc3b2;
+  --color-claude-300: #e6a189;
+  --color-claude-400: #de8a6d;
+  --color-claude-500: #d97757;
+  --color-claude-600: #c4623f;
+  --color-claude-700: #a04e32;
+  --color-claude-800: #7c3d28;
+  --color-claude-900: #5d2e1f;
   --font-sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   --font-mono: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 }
@@ -89,10 +100,10 @@ body.mock-desktop {
 @keyframes glow {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgb(245 158 11 / 0.7);
+    box-shadow: 0 0 0 0 rgb(217 119 87 / 0.7);
   }
   50% {
-    box-shadow: 0 0 0 6px rgb(245 158 11 / 0);
+    box-shadow: 0 0 0 6px rgb(217 119 87 / 0);
   }
 }
 .glow-dot {
@@ -140,6 +151,37 @@ body.mock-desktop {
   .glass-clear {
     text-shadow: 0 1px 6px rgb(0 0 0 / 0.75);
   }
+}
+
+/* The panel grows with its content (a dragged height is only a minimum, and the reply fills any
+   extra room). Once it hits the screen-height cap, only the latest reply shrinks and scrolls;
+   the header, problem bar, plan, buttons and answer box keep their size. */
+.glass-panel > .session-screen {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.session-screen > * {
+  flex-shrink: 0;
+}
+.session-screen > .exchange {
+  flex: 1 1 auto;
+  /* Even when squeezed, the reply keeps its own height or ~5 lines, whichever is smaller. */
+  min-height: calc-size(max-content, min(size, 7.5rem));
+  overflow-y: auto;
+}
+
+/* Mic button while connecting */
+@keyframes mic-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(244 63 94 / 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgb(244 63 94 / 0);
+  }
+}
+.mic-pulse {
+  animation: mic-pulse 1.2s infinite;
 }
 
 /* The island: the 4 s bar before an animation starts (READ_BEFORE_ANIMATION_MS). */

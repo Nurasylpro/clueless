@@ -1,4 +1,6 @@
-// The problem session: problem bar, plan, conversation, quick actions and the answer box.
+// The problem session, kept small: problem bar, current step, ONLY the latest exchange
+// (the student's last input and Clueless's last reply), quick actions and the answer box.
+// The full conversation still lives in the session (for the recap and memory); it's just not shown.
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import type {
   CheckResult,
@@ -7,48 +9,59 @@ import type {
   ProblemView,
   RecapView,
   SessionView,
+  StepIntent,
   Subject,
-  ThreadItem,
-  TurnView,
-  UserAction
+  TurnView
 } from '../../../shared/contracts'
 import { api } from '../api'
 import {
   BackIcon,
-  BulbIcon,
   CheckIcon,
-  ChevronDownIcon,
-  EyeIcon,
   FlagIcon,
   LockIcon,
-  NextIcon,
-  PlayIcon,
   PlusIcon,
   RetryIcon,
-  SendIcon
+  SendIcon,
+  SpeakerIcon,
+  SpeakerOffIcon
 } from '../components/icons'
 import { Markdown, MathText, mathToHtml } from '../components/Markdown'
-import { MicButton } from '../components/MicButton'
+import { MicButton, SpeakingStrip, VoiceStrip } from '../components/MicButton'
 import { Button, cx, IconButton } from '../components/ui'
 import { VisualSlot } from '../components/VisualSlot'
+import { speech } from '../voice/speaker'
+import { useVoiceConversation, type VoiceConversation } from '../voice/useVoiceConversation'
 
 type ComposerMode = 'answer' | 'recall'
 
 export function SessionScreen({ session, onOpenReview }: { session: SessionView; onOpenReview: () => void }) {
   const [mode, setMode] = useState<ComposerMode>('answer')
   const ready = Boolean(session.problem) && !session.busy
+  // Voice: what you say is sent exactly like a typed answer (spoken math goes as text, so the checker
+  // and the tutor read it like a typed sentence); new replies are read aloud in voice mode.
+  const conv = useVoiceConversation({
+    session,
+    disabled: !ready,
+    onSpoken: (text) => {
+      api.send({ text, as: mode === 'recall' ? 'recall' : 'text' })
+      setMode('answer')
+    }
+  })
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className="session-screen flex min-h-0 flex-col">
       {session.problem && <ProblemBar problem={session.problem} />}
-      {session.plan.length > 0 && <PlanList plan={session.plan} />}
-      <Thread session={session} onOpenReview={onOpenReview} />
+      {session.plan.length > 0 && <PlanList plan={session.plan} disabled={!ready || Boolean(session.recap)} />}
+      <LatestExchange session={session} onOpenReview={onOpenReview} onReadAloud={conv.readAloud} />
       {session.stuck.level === 2 && !session.busy && !session.recap && (
         <StuckBubble reason={session.stuck.reason} onRecall={() => setMode('recall')} />
       )}
-      {session.error && <ErrorBox message={session.error} canRetry={Boolean(session.problem) || !session.busy} />}
+      {session.error && (
+        // Without a problem there's nothing to retry: offer a way back to the start screen instead.
+        <ErrorBox message={session.error} canRetry={Boolean(session.problem)} onDismiss={session.problem ? null : () => api.action('new')} />
+      )}
       {session.problem && !session.recap && <QuickActions session={session} disabled={!ready} />}
-      {session.problem && <Composer session={session} mode={mode} setMode={setMode} disabled={!ready} />}
+      {session.problem && <Composer session={session} mode={mode} setMode={setMode} disabled={!ready} conv={conv} />}
     </div>
   )
 }
@@ -59,12 +72,12 @@ const SUBJECTS: Subject[] = ['coding', 'math', 'physics', 'other']
 
 function ProblemBar({ problem }: { problem: ProblemView }) {
   return (
-    <div className="flex items-start gap-2 border-b border-zinc-900/10 px-3 py-2.5 dark:border-white/10">
+    <div className="flex items-center gap-2 border-b border-zinc-900/10 px-3 py-1.5 dark:border-white/10" title={problem.summary}>
       <select
         value={problem.subject}
         onChange={(e) => api.setSubject(e.target.value as Subject)}
         title="Wrong subject? Change it"
-        className="no-drag mt-0.5 h-6 shrink-0 cursor-pointer rounded-md border-0 bg-amber-100 px-1.5 text-[11px] font-medium uppercase tracking-wide text-amber-900 outline-none dark:bg-amber-400/15 dark:text-amber-300"
+        className="no-drag h-5 shrink-0 cursor-pointer rounded border-0 bg-claude-100 px-1 text-[10px] font-semibold uppercase tracking-wide text-claude-900 outline-none dark:bg-claude-500/15 dark:text-claude-400"
       >
         {SUBJECTS.map((s) => (
           <option key={s} value={s}>
@@ -72,29 +85,33 @@ function ProblemBar({ problem }: { problem: ProblemView }) {
           </option>
         ))}
       </select>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-50">{problem.title}</div>
-        <div className="line-clamp-2 text-xs text-zinc-500 dark:text-zinc-400">{problem.summary}</div>
-      </div>
-      <IconButton title="New problem" onClick={() => api.action('new')}>
-        <PlusIcon size={15} />
+      <div className="min-w-0 flex-1 truncate text-[13px] font-semibold text-zinc-900 dark:text-zinc-50">{problem.title}</div>
+      <IconButton title="New problem" onClick={() => api.action('new')} className="h-6 w-6">
+        <PlusIcon size={14} />
       </IconButton>
     </div>
   )
 }
 
-function PlanList({ plan }: { plan: PlanStep[] }) {
+/** What clicking a step means, by its status. */
+const STEP_CLICK: Record<PlanStep['status'], { intent: StepIntent; hint: string; title: string }> = {
+  current: { intent: 'stuck', hint: 'Stuck?', title: 'Stuck on this step? Click for a hint about it' },
+  done: { intent: 'revisit', hint: 'Go back', title: 'Go back to this step' },
+  locked: { intent: 'claim', hint: 'Done it?', title: "Already done this? Click and Clueless will check" }
+}
+
+function PlanList({ plan, disabled }: { plan: PlanStep[]; disabled: boolean }) {
   const [open, setOpen] = useState(false)
   const current = plan.findIndex((s) => s.status === 'current')
   const done = plan.filter((s) => s.status === 'done').length
   const shown = open ? plan : plan.filter((s) => s.status === 'current')
 
   return (
-    <div className="border-b border-zinc-900/10 px-3 py-2 dark:border-white/10">
+    <div className="border-b border-zinc-900/10 px-3 py-1.5 dark:border-white/10">
       <button
         type="button"
         onClick={() => setOpen(!open)}
-        className="no-drag mb-1 flex w-full items-center gap-2 text-[11px] font-medium uppercase tracking-wide text-zinc-400"
+        className="no-drag mb-0.5 flex w-full items-center gap-2 text-[10px] font-medium uppercase tracking-wide text-zinc-400"
       >
         <span>Plan</span>
         <span className="flex flex-1 gap-0.5">
@@ -103,7 +120,7 @@ function PlanList({ plan }: { plan: PlanStep[] }) {
               key={s.id}
               className={cx(
                 'h-1 flex-1 rounded-full',
-                s.status === 'done' ? 'bg-emerald-500' : s.status === 'current' ? 'bg-amber-400' : 'bg-zinc-200 dark:bg-zinc-700'
+                s.status === 'done' ? 'bg-emerald-500' : s.status === 'current' ? 'bg-claude-500' : 'bg-zinc-200 dark:bg-zinc-700'
               )}
             />
           ))}
@@ -114,25 +131,44 @@ function PlanList({ plan }: { plan: PlanStep[] }) {
       </button>
       <ol className="space-y-0.5">
         {shown.map((s) => (
-          <li
-            key={s.id}
-            className={cx(
-              'flex items-start gap-2 text-[13px]',
-              s.status === 'current' && 'font-medium text-zinc-900 dark:text-zinc-50',
-              s.status === 'done' && 'text-zinc-400 line-through decoration-zinc-300 dark:decoration-zinc-600',
-              s.status === 'locked' && 'text-zinc-400 dark:text-zinc-500'
-            )}
-          >
-            <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
-              {s.status === 'done' ? (
-                <CheckIcon size={13} className="text-emerald-500" />
-              ) : s.status === 'locked' ? (
-                <LockIcon size={11} />
-              ) : (
-                <span className="h-2 w-2 rounded-full bg-amber-400" />
+          <li key={s.id}>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => api.step(s.id, STEP_CLICK[s.status].intent)}
+              title={disabled ? undefined : STEP_CLICK[s.status].title}
+              className={cx(
+                'no-drag group -mx-1 flex w-[calc(100%+0.5rem)] items-start gap-2 rounded-md px-1 py-px text-left text-[12.5px] transition-colors',
+                'enabled:hover:bg-zinc-900/5 disabled:cursor-default dark:enabled:hover:bg-white/10',
+                s.status === 'current' && 'font-medium text-zinc-900 dark:text-zinc-50',
+                s.status !== 'current' && 'text-zinc-400',
+                s.status === 'locked' && 'dark:text-zinc-500'
               )}
-            </span>
-            {s.text}
+            >
+              <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
+                {s.status === 'done' ? (
+                  <CheckIcon size={13} className="text-emerald-500" />
+                ) : s.status === 'locked' ? (
+                  <LockIcon size={11} />
+                ) : (
+                  <span className="h-2 w-2 rounded-full bg-claude-500" />
+                )}
+              </span>
+              {/* Locked steps arrive without text: they'd give the strategy away. */}
+              <span
+                className={cx(
+                  'min-w-0 flex-1',
+                  s.status === 'done' && 'line-through decoration-zinc-300 dark:decoration-zinc-600'
+                )}
+              >
+                {s.status === 'locked' ? `Step ${plan.indexOf(s) + 1}` : s.text}
+              </span>
+              {!disabled && (
+                <span className="shrink-0 text-[10.5px] font-normal text-claude-500 opacity-0 transition-opacity group-hover:opacity-100">
+                  {STEP_CLICK[s.status].hint}
+                </span>
+              )}
+            </button>
           </li>
         ))}
       </ol>
@@ -140,34 +176,46 @@ function PlanList({ plan }: { plan: PlanStep[] }) {
   )
 }
 
-// ---------- conversation ----------
+// ---------- the latest exchange ----------
 
-function Thread({ session, onOpenReview }: { session: SessionView; onOpenReview: () => void }) {
-  const end = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    end.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
-  }, [session.thread.length, session.busy, session.recap])
+function findLastIndex<T>(list: T[], test: (item: T) => boolean): number {
+  for (let i = list.length - 1; i >= 0; i--) if (test(list[i])) return i
+  return -1
+}
+
+/** Only the student's latest input and Clueless's latest reply. */
+function LatestExchange({
+  session,
+  onOpenReview,
+  onReadAloud
+}: {
+  session: SessionView
+  onOpenReview: () => void
+  onReadAloud: (markdown: string) => void
+}) {
+  const { thread } = session
+  const tutorAt = findLastIndex(thread, (t) => t.role === 'tutor')
+  const studentAt = findLastIndex(thread, (t) => t.role === 'student')
+  // A student message waiting for its reply, or the one that the latest reply answers.
+  const pending = studentAt > tutorAt
+  const showStudent = studentAt >= 0 && (pending || studentAt === tutorAt - 1)
+  const tutor = tutorAt >= 0 ? thread[tutorAt] : null
+  const student = showStudent ? thread[studentAt] : null
 
   return (
-    <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
-      {session.thread.map((item) => (
-        <div key={item.id}>
-          <ThreadRow item={item} />
-          {session.recap && session.recap.afterItemId === item.id && (
+    <div className="exchange space-y-2 px-3 py-2.5">
+      {student && student.role === 'student' && <StudentLine text={student.text} as={student.as} check={student.check} />}
+      {session.busy && <BusyRow label={session.busy} />}
+      {tutor && tutor.role === 'tutor' && !pending && (
+        <div className={cx('transition-opacity', session.busy && 'opacity-40')}>
+          <TutorCard turn={tutor.turn} onReadAloud={() => onReadAloud(tutor.turn.message)} />
+          {session.recap && session.recap.afterItemId === tutor.id && (
             <RecapCard recap={session.recap} onOpenReview={onOpenReview} />
           )}
         </div>
-      ))}
-      {session.busy && <BusyRow label={session.busy} />}
-      <div ref={end} />
+      )}
     </div>
   )
-}
-
-function ThreadRow({ item }: { item: ThreadItem }) {
-  if (item.role === 'tutor') return <TutorBubble itemId={item.id} turn={item.turn} />
-  if (item.role === 'student') return <StudentBubble text={item.text} as={item.as} check={item.check} />
-  return <div className="text-center text-xs text-zinc-400">{item.text}</div>
 }
 
 const KIND_LABEL: Partial<Record<TurnView['kind'], string>> = {
@@ -184,7 +232,7 @@ const GAP_LABEL = {
   careless_slip: 'Careless slip'
 } as const
 
-function TutorBubble({ itemId, turn }: { itemId: string; turn: TurnView }) {
+function TutorCard({ turn, onReadAloud }: { turn: TurnView; onReadAloud: () => void }) {
   const label = KIND_LABEL[turn.kind]
   const tone =
     turn.kind === 'recall_card'
@@ -196,25 +244,29 @@ function TutorBubble({ itemId, turn }: { itemId: string; turn: TurnView }) {
           : 'border-zinc-900/10 bg-white/70 dark:border-white/10 dark:bg-black/35'
 
   return (
-    <div className="flex gap-2">
-      <div className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-400 text-[11px] font-bold text-zinc-950">
-        ?
-      </div>
-      <div className={cx('min-w-0 flex-1 rounded-xl rounded-tl-sm border px-3 py-2 text-zinc-800 dark:text-zinc-100', tone)}>
-        {(label || turn.hintLevel > 0 || turn.gap || turn.verdict !== 'none') && (
-          <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[11px]">
-            <Verdict verdict={turn.verdict} />
-            {label && <span className="font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{label}</span>}
-            {turn.hintLevel > 0 && <HintDots level={turn.hintLevel} />}
-            {turn.gap && (
-              <span className="rounded-full bg-zinc-100 px-1.5 py-px text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
-                {GAP_LABEL[turn.gap.type]} · {turn.gap.topic}
-              </span>
-            )}
-          </div>
-        )}
+    <div className={cx('group relative rounded-xl border py-2 pl-3 pr-7 text-zinc-800 dark:text-zinc-100', tone)}>
+      <IconButton
+        title="Read aloud"
+        onClick={onReadAloud}
+        className="absolute right-1 top-1 h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+      >
+        <SpeakerIcon size={13} />
+      </IconButton>
+      {(label || turn.hintLevel > 0 || turn.gap || turn.verdict !== 'none') && (
+        <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[10.5px]">
+          <Verdict verdict={turn.verdict} />
+          {label && <span className="font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">{label}</span>}
+          {turn.hintLevel > 0 && <HintDots level={turn.hintLevel} />}
+          {turn.gap && (
+            <span className="truncate rounded-full bg-zinc-100 px-1.5 py-px text-zinc-500 dark:bg-white/10 dark:text-zinc-400">
+              {GAP_LABEL[turn.gap.type]} · {turn.gap.topic}
+            </span>
+          )}
+        </div>
+      )}
+      <div>
         <Markdown text={turn.message} />
-        <VisualSlot itemId={itemId} turn={turn} />
+        {turn.visual && turn.visual.frames.length > 0 && <VisualSlot visual={turn.visual} />}
       </div>
     </div>
   )
@@ -224,7 +276,7 @@ function Verdict({ verdict }: { verdict: TurnView['verdict'] }) {
   if (verdict === 'none') return null
   const map = {
     correct: ['Correct', 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300'],
-    partial: ['Partly', 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300'],
+    partial: ['Partly', 'bg-claude-100 text-claude-800 dark:bg-claude-600/15 dark:text-claude-400'],
     incorrect: ['Not quite', 'bg-rose-100 text-rose-800 dark:bg-rose-500/15 dark:text-rose-300']
   } as const
   const [text, cls] = map[verdict]
@@ -235,7 +287,7 @@ function HintDots({ level }: { level: number }) {
   return (
     <span className="flex items-center gap-0.5" title={`Hint level ${level} of 5`}>
       {[1, 2, 3, 4, 5].map((n) => (
-        <span key={n} className={cx('h-1.5 w-1.5 rounded-full', n <= level ? 'bg-amber-400' : 'bg-zinc-200 dark:bg-zinc-700')} />
+        <span key={n} className={cx('h-1.5 w-1.5 rounded-full', n <= level ? 'bg-claude-500' : 'bg-zinc-200 dark:bg-zinc-700')} />
       ))}
     </span>
   )
@@ -244,36 +296,38 @@ function HintDots({ level }: { level: number }) {
 const CHECK_LABEL: Record<CheckResult['status'], [string, string]> = {
   match: ['Math engine: matches', 'text-emerald-600 dark:text-emerald-400'],
   mismatch: ["Math engine: doesn't match", 'text-rose-600 dark:text-rose-400'],
-  missing_units: ['Math engine: add units', 'text-amber-600 dark:text-amber-400'],
+  missing_units: ['Math engine: add units', 'text-claude-600 dark:text-claude-500'],
   wrong_units: ["Math engine: units don't match", 'text-rose-600 dark:text-rose-400'],
   unparseable: ["Math engine: couldn't read this as math", 'text-zinc-400']
 }
 
-function StudentBubble({ text, as, check }: { text: string; as: InputKind; check: CheckResult | null }) {
+function StudentLine({ text, as, check }: { text: string; as: InputKind; check: CheckResult | null }) {
   return (
-    <div className="flex flex-col items-end">
-      <div className="max-w-[85%] rounded-xl rounded-tr-sm bg-zinc-900 px-3 py-2 text-[13.5px] text-white dark:bg-zinc-100 dark:text-zinc-900">
-        {as === 'recall' && <div className="mb-0.5 text-[11px] uppercase tracking-wide opacity-60">How do I write…</div>}
+    <div className="flex items-start gap-2 text-[12.5px]">
+      <span className="mt-px shrink-0 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
+        {as === 'recall' ? 'Asked' : 'You'}
+      </span>
+      <div className="min-w-0 flex-1">
         {as === 'code' ? (
-          <pre className="selectable whitespace-pre-wrap font-mono text-[12.5px]">{text}</pre>
+          <pre className="selectable line-clamp-3 whitespace-pre-wrap font-mono text-[11.5px] text-zinc-700 dark:text-zinc-300">{text}</pre>
         ) : as === 'math' && mathToHtml(text) ? (
-          <MathText input={text} className="selectable" />
+          <MathText input={text} className="selectable text-zinc-700 dark:text-zinc-300" />
         ) : (
-          <span className="selectable whitespace-pre-wrap">{text}</span>
+          <span className="selectable line-clamp-2 text-zinc-700 dark:text-zinc-300">{text}</span>
         )}
+        {check && <div className={cx('text-[10.5px]', CHECK_LABEL[check.status][1])}>{CHECK_LABEL[check.status][0]}</div>}
       </div>
-      {check && <div className={cx('mt-1 text-[11px]', CHECK_LABEL[check.status][1])}>{CHECK_LABEL[check.status][0]}</div>}
     </div>
   )
 }
 
 function BusyRow({ label }: { label: string }) {
   return (
-    <div className="flex items-center gap-2 pl-8 text-xs text-zinc-500 dark:text-zinc-400">
+    <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
       <span className="flex gap-0.5">
-        <span className="busy-dot h-1.5 w-1.5 rounded-full bg-amber-400" />
-        <span className="busy-dot h-1.5 w-1.5 rounded-full bg-amber-400" />
-        <span className="busy-dot h-1.5 w-1.5 rounded-full bg-amber-400" />
+        <span className="busy-dot h-1.5 w-1.5 rounded-full bg-claude-500" />
+        <span className="busy-dot h-1.5 w-1.5 rounded-full bg-claude-500" />
+        <span className="busy-dot h-1.5 w-1.5 rounded-full bg-claude-500" />
       </span>
       {label}
     </div>
@@ -282,9 +336,9 @@ function BusyRow({ label }: { label: string }) {
 
 function RecapCard({ recap, onOpenReview }: { recap: RecapView; onOpenReview: () => void }) {
   return (
-    <div className="mt-3 rounded-xl border border-amber-300/70 bg-amber-50/60 p-3 text-[13px] text-zinc-800 dark:border-amber-500/30 dark:bg-amber-500/5 dark:text-zinc-100">
+    <div className="mt-2 rounded-xl border border-claude-400/70 bg-claude-50/60 p-3 text-[12.5px] text-zinc-800 dark:border-claude-600/30 dark:bg-claude-600/5 dark:text-zinc-100">
       <div className="mb-2 flex items-center gap-2">
-        <FlagIcon size={14} className="text-amber-500" />
+        <FlagIcon size={14} className="text-claude-600" />
         <span className="font-semibold">Recap</span>
         <span className="ml-auto text-xs text-zinc-500">
           {recap.solved ? 'Solved' : 'Not solved yet'} · {recap.attempts} answers · {recap.hintsUsed} hints
@@ -332,7 +386,7 @@ function RecapCard({ recap, onOpenReview }: { recap: RecapView; onOpenReview: ()
 
 function StuckBubble({ reason, onRecall }: { reason: string | null; onRecall: () => void }) {
   return (
-    <div className="mx-3 mb-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[13px] text-zinc-800 shadow-sm dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-zinc-100">
+    <div className="mx-3 mb-2 rounded-xl border border-claude-400 bg-claude-50 px-3 py-2 text-[13px] text-zinc-800 shadow-sm dark:border-claude-600/40 dark:bg-claude-600/10 dark:text-zinc-100">
       <div className="mb-1.5">
         <span className="font-semibold">Stuck?</span>
         {reason && <span className="text-zinc-500 dark:text-zinc-400"> Looks like {reason}.</span>}
@@ -352,13 +406,18 @@ function StuckBubble({ reason, onRecall }: { reason: string | null; onRecall: ()
   )
 }
 
-function ErrorBox({ message, canRetry }: { message: string; canRetry: boolean }) {
+function ErrorBox({ message, canRetry, onDismiss }: { message: string; canRetry: boolean; onDismiss: (() => void) | null }) {
   return (
-    <div className="mx-3 mb-2 flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[13px] text-rose-800 dark:border-rose-900 dark:bg-rose-950/50 dark:text-rose-200">
+    <div className="mx-3 mb-2 mt-2 flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-[12.5px] text-rose-800 dark:border-rose-900 dark:bg-rose-950/50 dark:text-rose-200">
       <span className="min-w-0 flex-1">{message}</span>
       {canRetry && (
         <Button variant="chip" onClick={() => api.action('retry')}>
           <RetryIcon size={12} /> Retry
+        </Button>
+      )}
+      {onDismiss && (
+        <Button variant="chip" onClick={onDismiss}>
+          Dismiss
         </Button>
       )}
     </div>
@@ -367,15 +426,15 @@ function ErrorBox({ message, canRetry }: { message: string; canRetry: boolean })
 
 function QuickActions({ session, disabled }: { session: SessionView; disabled: boolean }) {
   return (
-    <div className="flex justify-between gap-0.5 border-t border-zinc-900/10 px-3 pt-2 dark:border-white/10">
+    <div className="flex flex-wrap justify-between gap-0.5 border-t border-zinc-900/10 px-3 pt-1.5 dark:border-white/10">
       <Button variant="chip" disabled={disabled} onClick={() => api.action('hint')} title="A slightly bigger hint">
-        <BulbIcon size={12} /> Hint
+        Hint
       </Button>
       <Button variant="chip" disabled={disabled} onClick={() => api.action('next')} title="Not sure what to do next?">
-        <NextIcon size={12} /> What next?
+        What next?
       </Button>
       <Button variant="chip" disabled={disabled} onClick={() => api.action('check_my_work')} title="Clueless looks at your screen again">
-        <CheckIcon size={12} /> Check my work
+        Check my work
       </Button>
       <Button
         variant="chip"
@@ -383,16 +442,16 @@ function QuickActions({ session, disabled }: { session: SessionView; disabled: b
         onClick={() => api.action('reveal')}
         title={session.revealAllowed ? 'Show the full solution (logged)' : `Unlocks after ${3 - Math.min(3, session.attempts)} more tries`}
       >
-        {session.revealAllowed ? <EyeIcon size={12} /> : <LockIcon size={12} />} Reveal
+        {!session.revealAllowed && <LockIcon size={11} />} Reveal
       </Button>
       <Button
         variant="chip"
         disabled={disabled}
         onClick={() => api.action('finish')}
-        className={cx(session.solved && 'border-amber-400 bg-amber-400 text-zinc-950 hover:bg-amber-300 dark:bg-amber-400 dark:text-zinc-950')}
+        className={cx(session.solved && 'border-claude-500 bg-claude-500 text-white hover:bg-claude-400 dark:bg-claude-500 dark:text-white')}
         title="Finish and get your recap"
       >
-        <FlagIcon size={12} /> Finish
+        Finish
       </Button>
     </div>
   )
@@ -404,12 +463,14 @@ function Composer({
   session,
   mode,
   setMode,
-  disabled
+  disabled,
+  conv
 }: {
   session: SessionView
   mode: ComposerMode
   setMode: (m: ComposerMode) => void
   disabled: boolean
+  conv: VoiceConversation
 }) {
   const [text, setText] = useState('')
   const input = useRef<HTMLTextAreaElement>(null)
@@ -419,6 +480,14 @@ function Composer({
   useEffect(() => {
     if (!disabled) input.current?.focus()
   }, [disabled, mode, session.thread.length])
+
+  // Grow with the text (up to max-h), so the panel stays small for one-line answers.
+  useEffect(() => {
+    const el = input.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${el.scrollHeight}px`
+  }, [text, as])
 
   const submit = (value = text): void => {
     if (!value.trim() || disabled) return
@@ -446,7 +515,7 @@ function Composer({
           : 'Your answer or question…'
 
   return (
-    <div className="px-3 pb-3 pt-2">
+    <div className="px-3 pb-2.5 pt-1.5">
       {session.expects === 'choice' && session.choices.length > 0 && mode === 'answer' && (
         <div className="mb-2 flex flex-wrap gap-1.5">
           {session.choices.map((c) => (
@@ -456,7 +525,7 @@ function Composer({
           ))}
         </div>
       )}
-      <div className="mb-1.5 flex items-center gap-1 text-[11px]">
+      <div className="mb-1 flex items-center gap-1 text-[10.5px]">
         {(['answer', 'recall'] as const).map((m) => (
           <button
             key={m}
@@ -472,34 +541,50 @@ function Composer({
             {m === 'answer' ? 'Answer' : 'How do I write…?'}
           </button>
         ))}
-        {mode === 'recall' ? (
-          <IconButton title="Back to answering" onClick={() => setMode('answer')} className="ml-auto h-5 w-5">
+        {mode === 'recall' && (
+          <IconButton title="Back to answering" onClick={() => setMode('answer')} className="h-5 w-5">
             <BackIcon size={12} />
           </IconButton>
-        ) : (
-          <AnimateMenu disabled={disabled} />
         )}
+        <button
+          type="button"
+          onClick={() => conv.setEnabled(!conv.enabled)}
+          aria-pressed={conv.enabled}
+          title={conv.enabled ? 'Voice on: replies are read aloud. Click to turn off' : 'Voice off. Click to have replies read aloud'}
+          className={cx(
+            'no-drag ml-auto flex items-center gap-1 rounded-full px-2 py-0.5 transition-colors',
+            conv.enabled
+              ? 'bg-claude-100 text-claude-800 dark:bg-claude-500/15 dark:text-claude-400'
+              : 'text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-white/10'
+          )}
+        >
+          {conv.enabled ? <SpeakerIcon size={11} /> : <SpeakerOffIcon size={11} />}
+          Voice {conv.enabled ? 'on' : 'off'}
+        </button>
       </div>
-      <div className="flex items-end gap-1.5 rounded-xl border border-zinc-900/10 bg-white/70 px-2 py-1.5 focus-within:border-amber-400 dark:border-white/15 dark:bg-black/35">
+      <SpeakingStrip conv={conv} onStop={speech.stop} onPause={speech.pause} onResume={speech.resume} />
+      <VoiceStrip voice={conv.input} onDismiss={conv.input.cancel} />
+      <div className="flex items-end gap-1.5 rounded-xl border border-zinc-900/10 bg-white/70 px-2 py-1 focus-within:border-claude-500 dark:border-white/15 dark:bg-black/35">
+
         <textarea
           ref={input}
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
           placeholder={placeholder}
-          rows={as === 'code' ? 4 : 2}
+          rows={as === 'code' ? 3 : 1}
           disabled={disabled}
           className={cx(
-            'no-drag max-h-40 min-h-[2.5rem] flex-1 resize-none bg-transparent text-[13.5px] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-50',
+            'no-drag max-h-28 min-h-[1.75rem] flex-1 resize-none bg-transparent py-0.5 text-[13px] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-50',
             as === 'code' && 'font-mono text-[12.5px]'
           )}
         />
-        <MicButton onTranscript={(t) => setText(t)} disabled={disabled} />
+        <MicButton conv={conv} disabled={disabled} />
         <IconButton
           title="Send"
           onClick={() => submit()}
           disabled={disabled || !text.trim()}
-          className="bg-amber-400 text-zinc-950 hover:bg-amber-300 hover:text-zinc-950 disabled:opacity-40 dark:text-zinc-950 dark:hover:bg-amber-300"
+          className="bg-claude-500 text-white hover:bg-claude-400 hover:text-white disabled:opacity-40 dark:text-white dark:hover:bg-claude-400"
         >
           <SendIcon size={15} />
         </IconButton>
@@ -507,80 +592,6 @@ function Composer({
       {as === 'math' && text.trim() && (
         <div className="mt-1.5 min-h-5 truncate px-1 text-sm text-zinc-700 dark:text-zinc-200">
           {mathToHtml(text) ? <MathText input={text} /> : <span className="text-xs text-zinc-400">Can't read that as math yet</span>}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ---------- animate button ----------
-
-const ANIMATE_MORE: { action: UserAction; label: string; title: string }[] = [
-  { action: 'animate_problem', label: 'Animate the problem', title: "Watch the problem's example fill in, step by step" },
-  { action: 'animate_question', label: 'Animate the question', title: 'See the idea behind the current question' }
-]
-
-/** "Animate my code ▾": the student always chooses when to animate; Clueless never starts one itself. */
-function AnimateMenu({ disabled }: { disabled: boolean }) {
-  const [open, setOpen] = useState(false)
-  const box = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent): void => {
-      if (!box.current?.contains(e.target as Node)) setOpen(false)
-    }
-    window.addEventListener('mousedown', onDown)
-    return () => window.removeEventListener('mousedown', onDown)
-  }, [open])
-
-  const run = (action: UserAction): void => {
-    setOpen(false)
-    api.action(action)
-  }
-
-  const part =
-    'no-drag flex h-6 items-center border border-zinc-900/10 bg-white/70 text-zinc-700 transition-colors hover:border-amber-400 hover:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/15 dark:bg-black/40 dark:text-zinc-200 dark:hover:border-amber-400 dark:hover:text-white'
-
-  return (
-    <div ref={box} className="relative ml-auto flex">
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => run('animate_code')}
-        title="Drag a box around your code, then watch it run"
-        className={cx(part, 'gap-1 rounded-l-full pl-2 pr-1.5')}
-      >
-        <PlayIcon size={10} className="text-amber-500" /> Animate my code
-      </button>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => setOpen(!open)}
-        title="More ways to animate"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className={cx(part, '-ml-px rounded-r-full px-1')}
-      >
-        <ChevronDownIcon size={12} />
-      </button>
-      {open && (
-        <div
-          role="menu"
-          className="absolute bottom-full right-0 z-20 mb-1 w-48 overflow-hidden rounded-lg border border-zinc-900/10 bg-white py-1 shadow-lg dark:border-white/15 dark:bg-zinc-900"
-        >
-          {ANIMATE_MORE.map((item) => (
-            <button
-              key={item.action}
-              type="button"
-              role="menuitem"
-              title={item.title}
-              onClick={() => run(item.action)}
-              className="no-drag flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-zinc-700 hover:bg-amber-50 dark:text-zinc-200 dark:hover:bg-white/10"
-            >
-              <PlayIcon size={10} className="text-amber-500" /> {item.label}
-            </button>
-          ))}
         </div>
       )}
     </div>

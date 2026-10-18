@@ -8,11 +8,11 @@ import type {
   CluelessApi,
   MemoryView,
   SessionView,
-  StageShow,
   ThreadItem,
-  TurnView
+  TurnView,
+  VoiceStateEvent
 } from '../../../shared/contracts'
-import { MOCK_AFTER_RECAP, MOCK_ANIMATIONS, MOCK_GAPS, MOCK_PROBLEM, MOCK_RECAP, MOCK_TURNS } from './fixtures'
+import { MOCK_AFTER_RECAP, MOCK_GAPS, MOCK_PROBLEM, MOCK_RECAP, MOCK_TURNS } from './fixtures'
 
 const DELAY = 700
 
@@ -20,8 +20,7 @@ export function createMockApi(): CluelessApi {
   let view: SessionView | null = null
   let step = 0
   const listeners = new Set<(v: SessionView | null) => void>()
-  const stageListeners = new Set<(s: StageShow | null) => void>()
-  const showStage = (show: StageShow | null): void => stageListeners.forEach((cb) => cb(show))
+  const voiceStates = new Set<(e: VoiceStateEvent) => void>()
   let cards: CardView[] = [
     { id: 'c1', subject: 'math', topic: 'integration by parts', front: 'What is the integration by parts formula?', back: '$\\int u\\,dv = uv - \\int v\\,du$', due: new Date().toISOString() },
     { id: 'c2', subject: 'coding', topic: 'Valid Sudoku', front: 'Python: make a list of 9 empty sets', back: '`[set() for _ in range(9)]`', due: new Date().toISOString() }
@@ -49,7 +48,8 @@ export function createMockApi(): CluelessApi {
   const pushTutor = (turn: TurnView): void => {
     if (!view) return
     view.thread.push({ id: crypto.randomUUID(), role: 'tutor', turn, at: Date.now() })
-    view.plan = turn.plan
+    // Like the real app: locked steps arrive without their text.
+    view.plan = turn.plan.map((s) => (s.status === 'locked' ? { ...s, text: '' } : s))
     view.expects = turn.expects
     view.choices = turn.choices
     if (turn.verdict !== 'none') {
@@ -152,18 +152,23 @@ export function createMockApi(): CluelessApi {
           }
         })
       }
-      if (action === 'animate_code' || action === 'animate_problem' || action === 'animate_question') {
-        const target = action === 'animate_code' ? 'code' : action === 'animate_problem' ? 'problem' : 'question'
-        return reply('Getting the animation ready…', () => pushTutor({ ...MOCK_ANIMATIONS[target], plan: MOCK_TURNS[step].plan }))
-      }
       if (action === 'reveal') view.revealed = true
       reply(action === 'hint' ? 'Thinking of a hint…' : 'Thinking…', nextTurn)
+    },
+    step: (id, intent) => {
+      if (!view) return
+      const n = view.plan.findIndex((s) => s.id === id) + 1
+      const text = intent === 'stuck' ? `Stuck on step ${n}` : intent === 'revisit' ? `Back to step ${n}` : `I think I've done step ${n}`
+      view.thread.push({ id: crypto.randomUUID(), role: 'student', text, as: 'text', check: null, at: Date.now() })
+      reply(intent === 'stuck' ? 'Thinking of a hint…' : 'Thinking…', nextTurn)
     },
     setSubject: (subject) => {
       if (view?.problem) view.problem.subject = subject
       emit()
     },
     setWindowMode: () => {},
+    fitHeight: () => {},
+    resizeWidth: () => {},
     hide: () => console.log('[mock] hide'),
     quit: () => console.log('[mock] quit'),
     openScreenSettings: () => {},
@@ -174,15 +179,22 @@ export function createMockApi(): CluelessApi {
     },
     areaDone: (rect) => console.log('[mock] area', rect),
     areaCancel: () => console.log('[mock] area cancelled'),
-    playOnScreen: (play) => {
-      // The panel, so the floating card stays out from under it (the real app gets this from the window).
-      const panel = document.querySelector('.glass-panel')?.getBoundingClientRect()
-      showStage({ ...play, avoid: panel ? { x: panel.x, y: panel.y, width: panel.width, height: panel.height } : null })
+    // Voice needs the desktop app (Deepgram runs in the main process): report that instead.
+    micAccess: async () => true,
+    voiceStart: (id) => {
+      setTimeout(() => {
+        voiceStates.forEach((cb) => cb({ id, state: 'error', message: 'Voice works in the desktop app (npm run dev).' }))
+      }, 300)
     },
-    stopOnScreen: () => showStage(null),
-    onStage: (cb) => {
-      stageListeners.add(cb)
-      return () => stageListeners.delete(cb)
-    }
+    voiceAudio: () => {},
+    voiceStop: () => {},
+    voiceCancel: () => {},
+    onVoiceTranscript: () => () => {},
+    onVoiceState: (cb) => {
+      voiceStates.add(cb)
+      return () => voiceStates.delete(cb)
+    },
+    onVoiceToggle: () => () => {},
+    tts: async () => ({ ok: false, reason: 'no-key', message: 'ElevenLabs runs in the desktop app.' })
   }
 }

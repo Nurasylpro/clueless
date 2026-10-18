@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { SessionView, TutorReplyT, TutorTurn } from '../shared/contracts'
 import { MemoryStore } from './memory/store'
-import { SessionController, type AreaCapture } from './session'
+import { SessionController } from './session'
 import type { SendInput, StartInput, TutorLike } from './tutor/tutor'
 
 const turn = (over: Partial<TutorTurn> = {}): TutorTurn => ({
@@ -34,19 +34,7 @@ class FakeTutor implements TutorLike {
   }
 }
 
-const SHOT: AreaCapture = {
-  screen: { data: 'SCREEN', mediaType: 'image/jpeg' },
-  crop: { data: 'CROP', mediaType: 'image/jpeg' },
-  area: { displayId: 1, rect: { x: 10, y: 20, width: 300, height: 200 } }
-}
-
-const sudokuVisual = {
-  caption: 'boxes',
-  frames: [{ type: 'sets' as const, name: 'boxes', bins: [{ label: 'boxes[0]', items: ['5'] }], flash: -1 }],
-  focus: [{ top: 0.1, bottom: 0.2 }]
-}
-
-function setup(area: AreaCapture | null = SHOT) {
+function setup() {
   const tutor = new FakeTutor()
   const views: (SessionView | null)[] = []
   const memory = new MemoryStore(null)
@@ -55,7 +43,6 @@ function setup(area: AreaCapture | null = SHOT) {
     makeTutor: () => tutor,
     memory,
     captureScreen: async () => ({ data: 'AAAA', mediaType: 'image/jpeg' }),
-    captureArea: vi.fn(async () => area),
     emit: (v) => views.push(v),
     stuck
   })
@@ -69,6 +56,15 @@ describe('SessionController', () => {
     const json = JSON.stringify(views)
     expect(json).not.toContain('SECRET')
     expect(json).not.toContain('x^2*e^x')
+  })
+
+  it('still opens a usable session when Claude never names the problem', async () => {
+    const { tutor, controller, last } = setup()
+    tutor.start = async () => ({ problem: null, turn: turn(), recap: null })
+    await controller.startProblem({ text: 'something' })
+    expect(last().problem).toMatchObject({ subject: 'other', title: 'Your problem' })
+    await controller.action('hint')
+    expect(tutor.sent.at(-1)?.tag).toBe('HINT')
   })
 
   it('runs the math checker on the answer and tells the tutor the result', async () => {
@@ -121,42 +117,6 @@ describe('SessionController', () => {
     expect(memory.view().sessions).toBe(1)
   })
 
-  it('animates the selected code: both images go to the tutor, the turn plays over that area', async () => {
-    const { controller, tutor, last } = setup()
-    await controller.startProblem({ text: 'p' })
-    tutor.replies.push({ problem: null, turn: turn({ message: 'Watch the boxes fill.', visual: sudokuVisual }), recap: null })
-    await controller.action('animate_code')
-    const sent = tutor.sent.at(-1)!
-    expect(sent.tag).toBe('ANIMATE CODE')
-    expect(sent.image?.data).toBe('SCREEN')
-    expect(sent.crop?.data).toBe('CROP')
-    const item = last()!.thread.at(-1)!
-    expect(item.role === 'tutor' && item.turn.animation).toEqual({ target: 'code', area: SHOT.area })
-  })
-
-  it('does nothing when the student cancels the code selection', async () => {
-    const { controller, tutor } = setup(null)
-    await controller.startProblem({ text: 'p' })
-    await controller.action('animate_code')
-    expect(tutor.sent).toHaveLength(0)
-  })
-
-  it('animates the problem or the question inside the panel, and drops the button when it can\'t animate', async () => {
-    const { controller, tutor, last } = setup()
-    await controller.startProblem({ text: 'p' })
-    tutor.replies.push({ problem: null, turn: turn({ visual: sudokuVisual }), recap: null })
-    await controller.action('animate_problem')
-    expect(tutor.sent.at(-1)?.tag).toBe('ANIMATE PROBLEM')
-    let item = last()!.thread.at(-1)!
-    expect(item.role === 'tutor' && item.turn.animation).toEqual({ target: 'problem', area: null })
-
-    tutor.replies.push({ problem: null, turn: turn({ message: "I can't animate this.", visual: null }), recap: null })
-    await controller.action('animate_question')
-    expect(tutor.sent.at(-1)?.tag).toBe('ANIMATE QUESTION')
-    item = last()!.thread.at(-1)!
-    expect(item.role === 'tutor' && item.turn.animation).toBeNull()
-  })
-
   it('keeps the error and lets the student retry', async () => {
     const { controller, tutor, last } = setup()
     await controller.startProblem({ text: 'p' })
@@ -170,5 +130,46 @@ describe('SessionController', () => {
     await controller.action('retry')
     expect(last()!.error).toBeNull()
     expect(tutor.sent.at(-1)?.tag).toBe('HINT')
+  })
+
+  describe('plan steps', () => {
+    const plan = [
+      { id: 1, text: 'Write the formula', status: 'done' as const },
+      { id: 2, text: 'Pick u and dv', status: 'current' as const },
+      { id: 3, text: 'SECRET STRATEGY', status: 'locked' as const }
+    ]
+    const started = async () => {
+      const s = setup()
+      s.tutor.start = async () => ({
+        problem: { subject: 'math', title: 'P', summary: '', language: null, hiddenSolution: '' },
+        turn: turn({ plan }),
+        recap: null
+      })
+      await s.controller.startProblem({ text: 'p' })
+      return s
+    }
+
+    it("never sends a locked step's text to the UI", async () => {
+      const { views, last } = await started()
+      expect(JSON.stringify(views)).not.toContain('SECRET STRATEGY')
+      expect(last().plan.map((p) => p.text)).toEqual(['Write the formula', 'Pick u and dv', ''])
+    })
+
+    it('tells the tutor which step was clicked, with its full text', async () => {
+      const { controller, tutor, last } = await started()
+      await controller.step(2, 'stuck')
+      expect(tutor.sent.at(-1)).toMatchObject({ tag: 'STEP STUCK', text: 'step 2: Pick u and dv' })
+      expect(last().thread.some((t) => t.role === 'student' && t.text === 'Stuck on step 2')).toBe(true)
+    })
+
+    it('ignores clicks that do not match the step state', async () => {
+      const { controller, tutor } = await started()
+      await controller.step(2, 'revisit') // step 2 is current, not done
+      await controller.step(1, 'claim') // step 1 is done, not locked
+      await controller.step(9, 'stuck') // no such step
+      expect(tutor.sent).toHaveLength(0)
+      await controller.step(3, 'claim')
+      expect(tutor.sent.at(-1)).toMatchObject({ tag: 'STEP CLAIM', text: 'step 3: SECRET STRATEGY' })
+    })
   })
 })
