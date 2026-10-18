@@ -1,9 +1,27 @@
 // Header, setup banners and the empty "stuck on something?" screen.
-import { useState } from 'react'
+import { useRef, useState, type ButtonHTMLAttributes } from 'react'
 import type { AppStatus, StuckState } from '../../../shared/contracts'
 import { api } from '../api'
-import { CloseIcon, CropIcon, DropIcon, ExpandIcon, GapsIcon, Logo, PowerIcon, ScanIcon, ShrinkIcon } from '../components/icons'
-import { Button, cx, hotkeyLabel, IconButton, Kbd } from '../components/ui'
+import {
+  BulbIcon,
+  CloseIcon,
+  ExpandIcon,
+  FileIcon,
+  GapsIcon,
+  GearIcon,
+  LayersIcon,
+  Logo,
+  MinusIcon,
+  MonitorIcon,
+  PowerIcon,
+  ScanIcon,
+  SelectAreaIcon,
+  SendIcon,
+  SparkleIcon
+} from '../components/icons'
+import { MicButton } from '../components/MicButton'
+import { Button, cx, hotkeyLabel, IconButton } from '../components/ui'
+import type { VoiceConversation } from '../voice/useVoiceConversation'
 
 export type Glass = 'glass' | 'clear' | 'solid'
 export const GLASS_ALPHA: Record<Glass, number> = { glass: 0.62, clear: 0.38, solid: 0.96 }
@@ -24,41 +42,109 @@ export function Header({
   onToggleCompact: () => void
   onOpenGaps: () => void
 }) {
+  const [menu, setMenu] = useState(false)
   return (
-    <header className="drag flex h-10 shrink-0 items-center gap-2 border-b border-zinc-900/10 px-2.5 dark:border-white/10">
-      <div className="flex h-6 w-6 items-center justify-center rounded-md bg-claude-500 text-white">
-        <Logo size={15} />
+    <header className="drag relative flex h-11 shrink-0 items-center gap-2 border-b border-zinc-900/10 pl-3 pr-2 dark:border-white/10">
+      <div className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] bg-gradient-to-b from-claude-400 to-claude-500 text-white shadow-sm">
+        <Logo size={14} />
       </div>
-      <span className="text-[13px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">Clueless</span>
+      <span className="text-[14.5px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">Clueless</span>
       {stuck && stuck.level > 0 && (
         <span
           className={cx('glow-dot h-2.5 w-2.5 rounded-full bg-claude-500', stuck.level === 2 && 'bg-claude-600')}
           title={stuck.reason ?? 'Stuck?'}
         />
       )}
-      <div className="ml-auto flex items-center gap-0.5">
+      <div className="ml-auto flex items-center gap-1">
         {compact && (
           <Button variant="primary" className="mr-1 h-7 px-2.5 text-xs" onClick={() => api.ask('screen')}>
             <ScanIcon size={13} /> Ask
           </Button>
         )}
-        <IconButton title={`Transparency: ${glass} (click to change)`} onClick={() => onGlass(NEXT_GLASS[glass])}>
-          <DropIcon size={14} className={glass === 'solid' ? '' : glass === 'glass' ? 'opacity-70' : 'opacity-40'} />
-        </IconButton>
-        <IconButton title="Your gaps" onClick={onOpenGaps}>
+        <HeaderButton title="Your gaps" onClick={onOpenGaps}>
           <GapsIcon size={15} />
-        </IconButton>
-        <IconButton title={compact ? 'Expand' : 'Shrink to a bar'} onClick={onToggleCompact}>
-          {compact ? <ExpandIcon size={13} /> : <ShrinkIcon size={15} />}
-        </IconButton>
-        <IconButton title="Hide (Esc). The hotkey brings it back." onClick={() => api.hide()}>
+        </HeaderButton>
+        <HeaderButton title={`Transparency: ${glass} (click to change)`} onClick={() => onGlass(NEXT_GLASS[glass])}>
+          <LayersIcon size={14} className={glass === 'solid' ? '' : glass === 'glass' ? 'opacity-80' : 'opacity-50'} />
+        </HeaderButton>
+        <HeaderButton title={compact ? 'Expand' : 'Shrink to a bar'} onClick={onToggleCompact}>
+          {compact ? <ExpandIcon size={13} /> : <MinusIcon size={15} />}
+        </HeaderButton>
+        <HeaderButton title="Hide (Esc). The hotkey brings it back." onClick={() => api.hide()}>
           <CloseIcon size={15} />
-        </IconButton>
-        <IconButton title="Quit Clueless" onClick={() => api.quit()}>
-          <PowerIcon size={14} />
-        </IconButton>
+        </HeaderButton>
+        <HeaderButton title="Settings" onClick={() => setMenu(!menu)} aria-expanded={menu}>
+          <GearIcon size={14} />
+        </HeaderButton>
       </div>
+      {menu && (
+        <>
+          <div className="no-drag fixed inset-0 z-10" onClick={() => setMenu(false)} />
+          <div className="no-drag absolute right-2 top-[40px] z-20 w-40 rounded-lg border border-zinc-900/10 bg-white p-1 text-[12px] shadow-lg dark:border-white/10 dark:bg-zinc-900">
+            <button
+              type="button"
+              onClick={() => onGlass(NEXT_GLASS[glass])}
+              className="flex w-full items-center justify-between rounded-lg px-2.5 py-1.5 text-left text-zinc-700 hover:bg-zinc-100 dark:text-zinc-200 dark:hover:bg-white/10"
+            >
+              Transparency <span className="capitalize text-zinc-400">{glass}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => api.quit()}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/10"
+            >
+              <PowerIcon size={14} /> Quit Clueless
+            </button>
+          </div>
+        </>
+      )}
     </header>
+  )
+}
+
+/**
+ * Compact mode: just a pill. The logo reads the screen; the mic talks to Clueless right from here
+ * (with no problem yet, what you say becomes the problem). Drag it anywhere.
+ */
+export function CompactBar({
+  conv,
+  busy,
+  onExpand
+}: {
+  conv: VoiceConversation
+  busy: boolean // the tutor is working
+  onExpand: () => void
+}) {
+  return (
+    <div className="drag flex h-[52px] items-center gap-2.5 pl-2.5 pr-2">
+      <button
+        type="button"
+        onClick={() => api.ask('screen')}
+        disabled={busy}
+        title="Read my screen (Ctrl/⌘+Shift+Space)"
+        className="no-drag flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[8px] bg-gradient-to-b from-claude-400 to-claude-500 text-white shadow-sm transition hover:brightness-110 active:brightness-95 disabled:opacity-60"
+      >
+        <Logo size={16} />
+      </button>
+      <span className="text-[15px] font-medium tracking-tight text-zinc-900 dark:text-zinc-50">Clueless</span>
+      <span className="ml-auto" />
+      <MicButton conv={conv} disabled={busy} round />
+      <HeaderButton title="Expand" onClick={onExpand}>
+        <MinusIcon size={16} />
+      </HeaderButton>
+      <HeaderButton title="Hide (Esc). The hotkey brings it back." onClick={() => api.hide()}>
+        <CloseIcon size={16} />
+      </HeaderButton>
+    </div>
+  )
+}
+
+function HeaderButton({ className, ...rest }: ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <IconButton
+      className={cx('h-7 w-7 rounded-md text-zinc-500 dark:text-zinc-300 dark:hover:text-white', className)}
+      {...rest}
+    />
   )
 }
 
@@ -97,6 +183,7 @@ export function Banners({ status }: { status: AppStatus | null }) {
 
 export function EmptyState({ status }: { status: AppStatus | null }) {
   const [text, setText] = useState('')
+  const input = useRef<HTMLTextAreaElement>(null)
   const askKey = hotkeyLabel(status?.hotkeys.ask ?? 'CommandOrControl+Shift+Space', status?.platform)
   const areaKey = hotkeyLabel(status?.hotkeys.area ?? 'CommandOrControl+Shift+2', status?.platform)
   const start = (): void => {
@@ -104,32 +191,70 @@ export function EmptyState({ status }: { status: AppStatus | null }) {
   }
 
   return (
-    <div className="space-y-2.5 px-3 py-3">
-      <p className="text-[12.5px] leading-relaxed text-zinc-600 dark:text-zinc-300">
-        Stuck? Press <Kbd>{askKey}</Kbd> on any problem. You get clues, not answers.
-      </p>
-      <div className="grid grid-cols-2 gap-1.5">
-        <Button variant="primary" className="h-8 text-[12.5px]" onClick={() => api.ask('screen')}>
-          <ScanIcon size={14} /> Read my screen
-        </Button>
-        <Button className="h-8 text-[12.5px]" onClick={() => api.ask('area')} title={`Select just the problem (${areaKey})`}>
-          <CropIcon size={13} /> Select area
-        </Button>
+    <div className="flex flex-col">
+      <div className="flex flex-col items-center px-8 pb-4 pt-6 text-center">
+        <SparkleIcon size={22} strokeWidth={1.6} className="text-claude-500 dark:text-claude-400" />
+        <h1 className="mt-3 text-[18px] font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">Stuck on something?</h1>
+        <p className="mt-0.5 text-[12.5px] text-zinc-500 dark:text-zinc-400">Let&apos;s work through it together.</p>
+        <button
+          type="button"
+          onClick={() => api.ask('screen')}
+          title={`Read my screen (${askKey})`}
+          className="no-drag mt-5 flex h-10 w-full items-center justify-center gap-2.5 rounded-[10px] bg-gradient-to-b from-claude-400 to-claude-500 text-[13px] font-semibold text-white shadow-[0_6px_20px_-6px_rgb(217_119_87/0.55)] transition hover:brightness-105 active:brightness-95"
+        >
+          <MonitorIcon size={16} strokeWidth={1.8} /> Read my screen
+        </button>
+        <div className="mt-4 flex w-full items-center gap-3 text-[11.5px] text-zinc-400 dark:text-zinc-500">
+          <span className="h-px flex-1 bg-zinc-900/10 dark:bg-white/10" />
+          or
+          <span className="h-px flex-1 bg-zinc-900/10 dark:bg-white/10" />
+        </div>
+        <div className="mt-2 grid w-full grid-cols-2">
+          <button
+            type="button"
+            onClick={() => api.ask('area')}
+            title={`Select just the problem (${areaKey})`}
+            className="no-drag flex items-center justify-center gap-2 rounded-lg py-2 text-[12.5px] text-zinc-600 transition-colors hover:bg-zinc-900/5 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-white/5 dark:hover:text-white"
+          >
+            <SelectAreaIcon size={17} strokeWidth={1.6} /> Select area
+          </button>
+          <button
+            type="button"
+            onClick={() => input.current?.focus()}
+            title="Type or paste the problem below"
+            className="no-drag flex items-center justify-center gap-2 rounded-lg py-2 text-[12.5px] text-zinc-600 transition-colors hover:bg-zinc-900/5 hover:text-zinc-900 dark:text-zinc-300 dark:hover:bg-white/5 dark:hover:text-white"
+          >
+            <FileIcon size={17} strokeWidth={1.6} /> Paste a problem
+          </button>
+        </div>
       </div>
-      <div className="flex items-end gap-1.5 rounded-xl border border-zinc-900/10 bg-white/70 px-2 py-1 focus-within:border-claude-500 dark:border-white/15 dark:bg-black/35">
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              start()
-            }
-          }}
-          rows={1}
-          placeholder="…or paste a problem and press Enter"
-          className="no-drag min-h-[1.75rem] flex-1 resize-none bg-transparent py-0.5 text-[13px] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-50"
-        />
+      <div className="px-2 pb-2">
+        <div className="flex items-center gap-2.5 rounded-xl border border-zinc-900/10 bg-white/50 py-1.5 pl-3 pr-1.5 transition-colors focus-within:border-claude-400/70 dark:border-white/15 dark:bg-white/[0.03]">
+          <BulbIcon size={16} strokeWidth={1.6} className="shrink-0 text-zinc-500 dark:text-zinc-300" />
+          <textarea
+            ref={input}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                start()
+              }
+            }}
+            rows={1}
+            placeholder="Paste your question, code, or problem..."
+            className="no-drag max-h-32 min-h-[1.25rem] flex-1 resize-none bg-transparent py-0.5 text-[12.5px] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-50 dark:placeholder:text-zinc-400"
+          />
+          <button
+            type="button"
+            onClick={start}
+            disabled={!text.trim()}
+            title="Start (Enter)"
+            className="no-drag flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-zinc-900/5 text-zinc-500 transition-colors enabled:hover:bg-claude-500 enabled:hover:text-white disabled:cursor-default dark:bg-white/10 dark:text-zinc-300"
+          >
+            <SendIcon size={14} />
+          </button>
+        </div>
       </div>
     </div>
   )

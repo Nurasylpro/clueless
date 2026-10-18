@@ -6,7 +6,7 @@ import type { VoiceInput } from '../voice/useVoiceInput'
 import { MicIcon, PauseIcon, PlayIcon, SpeakerIcon, StopIcon } from './icons'
 import { cx, IconButton } from './ui'
 
-export function MicButton({ conv, disabled }: { conv: VoiceConversation; disabled?: boolean }) {
+export function MicButton({ conv, disabled, round = false }: { conv: VoiceConversation; disabled?: boolean; round?: boolean }) {
   const { state, level } = conv.input
   const { processing } = conv
   const speaking = conv.speech.state !== 'idle'
@@ -26,30 +26,25 @@ export function MicButton({ conv, disabled }: { conv: VoiceConversation; disable
                 ? `${conv.input.notice ?? 'Voice error'} Click to try again.`
                 : 'Talk instead of typing (Ctrl/⌘+Shift+1)'
 
-  return (
-    <IconButton
-      title={title}
-      aria-label={title}
-      aria-pressed={active}
-      disabled={(disabled && !active) || state === 'finishing'}
-      onClick={conv.toggleMic}
-      className={cx(
-        'disabled:cursor-not-allowed disabled:opacity-40',
-        state === 'listening' && 'bg-rose-500 text-white hover:bg-rose-500 hover:text-white dark:text-white dark:hover:bg-rose-500',
-        state === 'starting' && 'bg-rose-500/20 text-rose-600 dark:text-rose-300',
-        state === 'error' && 'text-rose-500 dark:text-rose-400',
-        (state === 'finishing' || processing || speaking) && 'text-claude-500 dark:text-claude-400'
-      )}
-    >
+  const shape = round ? 'rounded-full' : 'rounded-md'
+  const stateClasses = cx(
+    'disabled:cursor-not-allowed disabled:opacity-40',
+    state === 'listening' && 'bg-rose-500 text-white hover:bg-rose-500 hover:text-white dark:text-white dark:hover:bg-rose-500',
+    state === 'starting' && 'bg-rose-500/20 text-rose-600 dark:text-rose-300',
+    state === 'error' && 'text-rose-500 dark:text-rose-400',
+    (state === 'finishing' || processing || speaking) && 'text-claude-500 dark:text-claude-400'
+  )
+  const content = (
+    <>
       {state === 'listening' && (
         // Activity ring: grows with the loudness of your voice.
         <span
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 rounded-md ring-2 ring-rose-400/70 transition-transform duration-75"
+          className={cx('pointer-events-none absolute inset-0 ring-2 ring-rose-400/70 transition-transform duration-75', shape)}
           style={{ transform: `scale(${1 + level * 0.45})` }}
         />
       )}
-      {state === 'starting' && <span aria-hidden="true" className="mic-pulse pointer-events-none absolute inset-0 rounded-md" />}
+      {state === 'starting' && <span aria-hidden="true" className={cx('mic-pulse pointer-events-none absolute inset-0', shape)} />}
       {state === 'finishing' || processing ? (
         <span className="flex gap-0.5" aria-hidden="true">
           <span className="busy-dot h-1 w-1 rounded-full bg-current" />
@@ -57,10 +52,41 @@ export function MicButton({ conv, disabled }: { conv: VoiceConversation; disable
           <span className="busy-dot h-1 w-1 rounded-full bg-current" />
         </span>
       ) : speaking && !active ? (
-        <SpeakerIcon size={16} className={conv.speech.state === 'speaking' ? 'animate-pulse' : undefined} />
+        <SpeakerIcon size={round ? 17 : 16} className={conv.speech.state === 'speaking' ? 'animate-pulse' : undefined} />
       ) : (
-        <MicIcon size={16} />
+        <MicIcon size={round ? 17 : 16} />
       )}
+    </>
+  )
+  const props = {
+    title,
+    'aria-label': title,
+    'aria-pressed': active,
+    disabled: (disabled && !active) || state === 'finishing',
+    onClick: conv.toggleMic
+  }
+
+  if (round) {
+    // The compact pill's mic: a circle, orange at rest.
+    return (
+      <button
+        type="button"
+        {...props}
+        className={cx(
+          'no-drag relative flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full border transition-colors',
+          state === 'idle' && !processing && !speaking
+            ? 'border-zinc-900/10 bg-zinc-900/5 text-claude-500 hover:bg-zinc-900/10 dark:border-white/15 dark:bg-white/5 dark:text-claude-400 dark:hover:bg-white/10'
+            : 'border-transparent',
+          stateClasses
+        )}
+      >
+        {content}
+      </button>
+    )
+  }
+  return (
+    <IconButton {...props} className={stateClasses}>
+      {content}
     </IconButton>
   )
 }
