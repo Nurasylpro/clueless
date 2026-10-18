@@ -70,4 +70,4 @@ On Windows PowerShell, use `npm.cmd` if `npm` scripts are blocked.
 
 [DESIGN.md](DESIGN.md) has how it works and who did what. [BUILD_PLAN.md](BUILD_PLAN.md) has what's next.
 
-Made by Ali, Nuris, Rasim and Nurassyl at the Lehigh hackathon.
+Made by Ali, Nurislam, Rasim and Nurassyl at the Lehigh hackathon.
