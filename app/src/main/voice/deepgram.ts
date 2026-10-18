@@ -40,6 +40,13 @@ export const TIMEOUTS = {
 
 const MAX_QUEUED_BYTES = 2 * 1024 * 1024 // audio buffered while the connection opens
 
+/** Nova-3 listens harder for these words: the variable names in the code being discussed, so
+ *  "seen" isn't heard as "scene". At most 20, each a plain identifier. */
+export function listenUrl(keyterms: string[] = []): string {
+  const terms = [...new Set(keyterms.filter((t) => /^[A-Za-z_][A-Za-z0-9_]{1,40}$/.test(t)))].slice(0, 20)
+  return DEEPGRAM_URL + terms.map((t) => `&keyterm=${encodeURIComponent(t)}`).join('')
+}
+
 export class Utterance {
   private socket: SocketLike | null = null
   private queue: ArrayBufferView[] = []
@@ -55,7 +62,8 @@ export class Utterance {
     readonly id: string,
     private readonly apiKey: string,
     private readonly events: VoiceEvents,
-    private readonly makeSocket: SocketFactory
+    private readonly makeSocket: SocketFactory,
+    private readonly keyterms: string[] = []
   ) {}
 
   get done(): boolean {
@@ -66,7 +74,7 @@ export class Utterance {
     let socket: SocketLike
     try {
       // Browsers and Node can't set headers on a WebSocket; Deepgram accepts the key as a subprotocol.
-      socket = this.makeSocket(DEEPGRAM_URL, ['token', this.apiKey])
+      socket = this.makeSocket(listenUrl(this.keyterms), ['token', this.apiKey])
     } catch (err) {
       return this.fail(`Couldn't connect to Deepgram: ${errorText(err)}`)
     }
@@ -256,6 +264,8 @@ export class VoiceManager {
       apiKey: () => string | undefined
       events: VoiceEvents
       makeSocket: SocketFactory
+      /** Words to listen for in this utterance (optional). */
+      keyterms?: () => string[]
     }
   ) {}
 
@@ -271,7 +281,7 @@ export class VoiceManager {
       })
       return
     }
-    const utterance = new Utterance(id, key, this.deps.events, this.deps.makeSocket)
+    const utterance = new Utterance(id, key, this.deps.events, this.deps.makeSocket, this.deps.keyterms?.() ?? [])
     this.current = utterance
     utterance.start()
   }

@@ -92,6 +92,7 @@ describe('IslandController', () => {
     // Expand afterwards: the recap is there, and the animation can be watched again.
     controller.setExpanded(true)
     expect(last().messages.at(-1)).toEqual({ role: 'clueless', text: 'The loop counts down to 0.' })
+    expect(last().recapAt).toBe(0)
     controller.replay()
     expect(last()).toMatchObject({ phase: 'playing', expanded: false, playId: 2 })
   })

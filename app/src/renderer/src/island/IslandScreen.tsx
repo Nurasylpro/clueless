@@ -261,8 +261,8 @@ function Card({ view, mic, listening, reading }: { view: IslandView; mic: VoiceI
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: 'smooth' })
   }, [view.messages.length, thinking, listening, mic.heard, mic.interim])
 
-  const lastClueless = view.messages.reduce((at, m, i) => (m.role === 'clueless' ? i : at), -1)
-  const watchAgain = Boolean(view.trace) && !thinking
+  const recap = view.trace ? view.recapAt : -1
+  const watchAgain = recap >= 0 && !thinking
 
   return (
     <div
@@ -302,11 +302,11 @@ function Card({ view, mic, listening, reading }: { view: IslandView; mic: VoiceI
         {view.messages.map((m, i) =>
           m.role === 'clueless' ? (
             <div key={i} className="selectable">
-              {i === lastClueless && view.trace && (
+              {i === recap && (
                 <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-500">What the animation showed</div>
               )}
               <Markdown text={m.text} />
-              {i === lastClueless && watchAgain && (
+              {i === recap && watchAgain && (
                 <button
                   type="button"
                   onClick={() => islandApi.replay()}

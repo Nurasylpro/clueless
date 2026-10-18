@@ -209,3 +209,22 @@ export function withNarration(trace: CodeTrace, says: string[] = [], intro = '')
 function clampInt(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, Number.isFinite(v) ? Math.round(v) : lo))
 }
+
+const KEYWORDS = new Set(
+  ('and as assert async await break case catch char class const continue def default del do double elif else enum ' +
+    'except extends false final finally float for from function global if implements import in instanceof int is ' +
+    'lambda let long new none nonlocal not null or pass private protected public raise return self short static ' +
+    'string struct super switch this throw true try typeof var void while with yield auto bool vector list dict set ' +
+    'len range print').split(' ')
+)
+
+/** The names in some code worth listening for when the student talks about it: its variables and
+ *  functions (no keywords), most used first. For Deepgram's keyterms. */
+export function codeNames(code: string, max = 20): string[] {
+  const counts = new Map<string, number>()
+  for (const word of code.match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? []) {
+    if (word.length < 2 || KEYWORDS.has(word.toLowerCase())) continue
+    counts.set(word, (counts.get(word) ?? 0) + 1)
+  }
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, max).map(([w]) => w)
+}

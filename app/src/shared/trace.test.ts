@@ -85,3 +85,15 @@ describe('fromTraceWire', () => {
     }, code).trace?.outcome?.status).toBe('mismatch')
   })
 })
+
+describe('codeNames', () => {
+  it('picks the variables and functions, most used first, never keywords', async () => {
+    const { codeNames } = await import('./trace')
+    const names = codeNames('def containsDuplicate(self, nums):\n    seen = set()\n    for n in nums:\n        if n in seen:\n            return True\n        seen.add(n)\n    return False')
+    expect(names.slice(0, 2)).toEqual(['seen', 'nums'])
+    expect(names).toContain('add')
+    expect(names).toContain('containsDuplicate')
+    expect(names).not.toContain('def')
+    expect(names).not.toContain('self')
+  })
+})

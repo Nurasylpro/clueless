@@ -298,6 +298,7 @@ export interface IslandView {
   snippet: string | null // the highlight being discussed; null = a question about the screen
   messages: IslandMessage[] // with an animation, Clueless's message is the recap (under 60 words)
   trace: CodeTrace | null // the latest animation; kept after it has played, for "Watch again"
+  recapAt: number // the message that is that animation's recap (-1: none)
   playId: number // bumps every time an animation starts playing
   busySince: number | null // when the current Claude call started
   error: string | null

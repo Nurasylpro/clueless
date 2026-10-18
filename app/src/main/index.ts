@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os'
 import { join, sep } from 'node:path'
 import { IPC, ISLAND_IPC, type IslandView } from '../shared/contracts'
 import { IslandController, type ScreenImage } from '../shared/islandController'
+import { codeNames } from '../shared/trace'
 import { activeDisplay, captureDisplay, toModelImage } from './capture/capture'
 import { loadEnvFiles } from './env'
 import { SelectionWatcher, type Point } from './island/selection'
@@ -187,7 +188,12 @@ const voice = new VoiceManager({
     state: (e) => toIsland(IPC.voiceState, e)
   },
   // Node's built-in WebSocket (no extra package).
-  makeSocket: (url, protocols) => new WebSocket(url, protocols) as unknown as SocketLike
+  makeSocket: (url, protocols) => new WebSocket(url, protocols) as unknown as SocketLike,
+  // Listen harder for the names in the code being discussed ("seen", not "scene").
+  keyterms: () => {
+    const view = controller.current
+    return codeNames(view.trace?.code ?? view.snippet ?? '')
+  }
 })
 
 const elevenLabs = new ElevenLabs(
@@ -267,6 +273,13 @@ function setup(): void {
       await sleep(1500)
       const ok = await island?.webContents.executeJavaScript('Boolean(document.querySelector("[data-app-ready]"))')
       console.log(ok ? 'SMOKE OK' : 'SMOKE FAIL: UI did not render')
+      // CLUELESS_SMOKE_VOICE=1: also ask for a spoken line from inside the island, the way it reads steps.
+      if (ok && process.env.CLUELESS_SMOKE_VOICE === '1') {
+        const tts = await island?.webContents.executeJavaScript(
+          `window.clueless.tts({ text: 'Is one already in seen? Yes.' }).then((r) => r.ok ? 'ok ' + r.audio.byteLength + ' bytes ' + r.mime : r.reason + ': ' + r.message)`
+        )
+        console.log(`SMOKE VOICE: ${tts}`)
+      }
       app.exit(ok ? 0 : 1)
     })
     return

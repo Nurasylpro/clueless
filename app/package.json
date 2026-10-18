@@ -15,7 +15,8 @@
     "try": "tsx scripts/try-tutor.mts",
     "dist:mac": "electron-vite build && electron-builder --mac",
     "dist:win": "electron-vite build && electron-builder --win",
-    "trace": "tsx scripts/try-trace.mts"
+    "trace": "tsx scripts/try-trace.mts",
+    "voice-check": "tsx scripts/try-voice.mts"
   },
   "dependencies": {
     "@anthropic-ai/bedrock-sdk": "^0.35.0",

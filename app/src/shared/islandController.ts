@@ -189,6 +189,7 @@ export class IslandController {
     if (animate && reply.trace) {
       // No text screen first: the animation starts right away; its recap waits in the card.
       view.trace = reply.trace
+      view.recapAt = view.messages.length - 1
       view.phase = 'playing'
       view.expanded = false
       view.playId++
@@ -255,6 +256,7 @@ function freshView(animate: boolean, voice: boolean): IslandView {
     snippet: null,
     messages: [],
     trace: null,
+    recapAt: -1,
     playId: 0,
     busySince: null,
     error: null
