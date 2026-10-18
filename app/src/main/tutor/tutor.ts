@@ -24,6 +24,9 @@ export type Tag =
   | 'STEP STUCK'
   | 'STEP REVISIT'
   | 'STEP CLAIM'
+  | 'ANIMATE CODE'
+  | 'ANIMATE PROBLEM'
+  | 'ANIMATE QUESTION'
 
 export interface ImageInput {
   data: string // base64, no data: prefix
@@ -40,6 +43,7 @@ export interface SendInput {
   tag: Tag
   text?: string
   image?: ImageInput
+  crop?: ImageInput // a close-up of the area the student selected (sent after `image`)
   notes?: string[] // extra lines such as [CHECKER] or [SUBJECT]
 }
 
@@ -118,7 +122,7 @@ export class Tutor implements TutorLike {
     if (input.history) lines.push(`[STUDENT HISTORY] ${input.history}`)
     // The first call is the hard one (understand the problem, write the hidden solution), so it
     // thinks harder. Later turns are short and run at low effort for speed.
-    const reply = await this.request({ text: lines.join('\n'), image: input.image }, 'medium')
+    const reply = await this.request({ text: lines.join('\n'), images: input.image ? [input.image] : [] }, 'medium')
     if (reply.problem) return reply
     // Without "problem" the app has no subject, title or hidden solution: ask once more.
     this.log('tutor: first reply had no problem, asking again')
@@ -131,10 +135,11 @@ export class Tutor implements TutorLike {
   async send(input: SendInput): Promise<TutorReplyT> {
     const lines = [...(input.notes ?? [])]
     lines.push(input.text ? `[${input.tag}] ${input.text}` : `[${input.tag}]`)
-    return this.request({ text: lines.join('\n'), image: input.image }, 'low')
+    const images = [input.image, input.crop].filter((i): i is ImageInput => Boolean(i))
+    return this.request({ text: lines.join('\n'), images }, 'low')
   }
 
-  private userMessage(turn: { text: string; image?: ImageInput; toolError?: string }): BetaMessageParam {
+  private userMessage(turn: Turn): BetaMessageParam {
     const content: BetaContentBlockParam[] = []
     if (this.pendingToolUseId) {
       content.push({
@@ -144,15 +149,15 @@ export class Tutor implements TutorLike {
         ...(turn.toolError ? { is_error: true } : {})
       })
     }
-    if (turn.image) {
-      content.push({ type: 'image', source: { type: 'base64', media_type: turn.image.mediaType, data: turn.image.data } })
+    for (const image of turn.images ?? []) {
+      content.push({ type: 'image', source: { type: 'base64', media_type: image.mediaType, data: image.data } })
     }
     if (turn.text) content.push({ type: 'text', text: turn.text })
     return { role: 'user', content }
   }
 
   private async request(
-    turn: { text: string; image?: ImageInput; toolError?: string },
+    turn: Turn,
     effort: 'low' | 'medium',
     retries = 1
   ): Promise<TutorReplyT> {
@@ -259,6 +264,13 @@ export class Tutor implements TutorLike {
       return this.send_(params)
     }
   }
+}
+
+/** One user message: text, then images in order, or a tool error (Bedrock retry). */
+interface Turn {
+  text: string
+  images?: ImageInput[]
+  toolError?: string
 }
 
 /** A copy of the history with a cache breakpoint on the last block of the newest user message. */

@@ -1,6 +1,6 @@
 // The simplest figures for a program's variables: a box for a value, a row of boxes for an array,
 // a grid, a bag for a set, key → value rows for a map. What the current step changed lights up
-// (white glow, new values pop in amber); what it only reads gets a thin outline; the rest dims.
+// (white glow, new values pop in orange); what it only reads gets a thin outline; the rest dims.
 import { AnimatePresence, motion } from 'motion/react'
 import type { EntityValue, TraceEntity } from '../../../shared/trace'
 import { cx } from '../components/ui'
@@ -15,7 +15,7 @@ const POP = {
   exit: { opacity: 0, scale: 0.6 },
   transition: { type: 'spring', stiffness: 220, damping: 18 }
 } as const
-/** A cell that just changed: flashes amber, then settles back. */
+/** A cell that just changed: flashes orange, then settles back. */
 const FLASH = { backgroundColor: ['rgba(251,191,36,0.85)', 'rgba(251,191,36,0.85)', 'rgba(255,255,255,0.06)'] }
 
 export function Figure({
@@ -61,9 +61,9 @@ const BOX = 'flex items-center justify-center rounded-xl border-2 border-white/2
 
 function ValueBox({ value, changed }: { value: string; changed: boolean }) {
   return (
-    <div className={cx(BOX, 'h-16 min-w-16 overflow-hidden px-3 text-[26px]', changed && 'border-amber-300')}>
+    <div className={cx(BOX, 'h-16 min-w-16 overflow-hidden px-3 text-[26px]', changed && 'border-claude-400')}>
       <AnimatePresence mode="popLayout" initial={false}>
-        <motion.span key={value} {...POP} className={changed ? 'text-amber-200' : undefined}>
+        <motion.span key={value} {...POP} className={changed ? 'text-claude-200' : undefined}>
           {value || ' '}
         </motion.span>
       </AnimatePresence>
@@ -101,7 +101,7 @@ function ArrayRow({ items, changed, pointers }: { items: string[]; changed: Chan
                 <motion.div
                   layoutId={`ptr-${here.map((p) => p.name).join(',')}`}
                   transition={SPRING}
-                  className="whitespace-nowrap rounded-full bg-amber-300 px-2 font-mono text-[12px] font-semibold leading-5 text-zinc-950"
+                  className="whitespace-nowrap rounded-full bg-claude-400 px-2 font-mono text-[12px] font-semibold leading-5 text-zinc-950"
                 >
                   ↑ {here.map((p) => p.name).join(', ')}
                 </motion.div>
@@ -157,7 +157,7 @@ function SetBag({ items, fresh }: { items: string[]; fresh: string[] }) {
             transition={{ type: 'spring', stiffness: 160, damping: 16 }}
             className={cx(
               'flex h-10 min-w-10 items-center justify-center rounded-full px-2 font-mono text-[18px]',
-              isFresh.has(item) ? 'bg-amber-300 text-zinc-950' : 'bg-white/10 text-zinc-50'
+              isFresh.has(item) ? 'bg-claude-400 text-zinc-950' : 'bg-white/10 text-zinc-50'
             )}
           >
             {item}
@@ -184,7 +184,7 @@ function MapRows({ entries, changed }: { entries: { key: string; value: string }
             transition={SPRING}
             className={cx(
               'flex items-center gap-3 rounded-lg px-2.5 py-1 font-mono text-[17px] transition-colors duration-700',
-              hot.has(e.key) ? 'bg-amber-300 text-zinc-950' : 'bg-white/[0.06] text-zinc-50'
+              hot.has(e.key) ? 'bg-claude-400 text-zinc-950' : 'bg-white/[0.06] text-zinc-50'
             )}
           >
             <span className="font-semibold">{e.key}</span>

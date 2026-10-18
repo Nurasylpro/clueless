@@ -4,6 +4,11 @@
 
 ## Done ✅
 
+- [x] Voice: talk to Clueless (Deepgram), and it reads replies out loud (ElevenLabs, or the built-in voice) — Rasim
+- [x] Panel fixes: "what's tripping you up" after a scan, shorter replies, resizable panel, clickable plan steps — Nurislam
+- [x] Animate: "Animate my code / the problem / the question", drawn in the panel or right on your code, with renderers for every visual type — Nurassyl
+- [x] Island (Cmd/Ctrl+Shift+3): highlight code anywhere, Ask, then a step-by-step trace — Nurassyl
+
 - [x] Electron app: see-through overlay that stays on top on macOS and Windows; compact bar and full panel; Esc hides it
 - [x] Hotkeys: **Ctrl/Cmd+Shift+Space** reads the screen, **Ctrl/Cmd+Shift+2** selects an area
 - [x] Screen capture: the screen under the mouse, with the panel hidden during capture; area selection with display-scaling handled

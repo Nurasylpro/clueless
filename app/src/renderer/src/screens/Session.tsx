@@ -11,14 +11,17 @@ import type {
   SessionView,
   StepIntent,
   Subject,
-  TurnView
+  TurnView,
+  UserAction
 } from '../../../shared/contracts'
 import { api } from '../api'
 import {
   BackIcon,
   CheckIcon,
+  ChevronDownIcon,
   FlagIcon,
   LockIcon,
+  PlayIcon,
   PlusIcon,
   RetryIcon,
   SendIcon,
@@ -208,7 +211,7 @@ function LatestExchange({
       {session.busy && <BusyRow label={session.busy} />}
       {tutor && tutor.role === 'tutor' && !pending && (
         <div className={cx('transition-opacity', session.busy && 'opacity-40')}>
-          <TutorCard turn={tutor.turn} onReadAloud={() => onReadAloud(tutor.turn.message)} />
+          <TutorCard itemId={tutor.id} turn={tutor.turn} onReadAloud={() => onReadAloud(tutor.turn.message)} />
           {session.recap && session.recap.afterItemId === tutor.id && (
             <RecapCard recap={session.recap} onOpenReview={onOpenReview} />
           )}
@@ -232,7 +235,7 @@ const GAP_LABEL = {
   careless_slip: 'Careless slip'
 } as const
 
-function TutorCard({ turn, onReadAloud }: { turn: TurnView; onReadAloud: () => void }) {
+function TutorCard({ itemId, turn, onReadAloud }: { itemId: string; turn: TurnView; onReadAloud: () => void }) {
   const label = KIND_LABEL[turn.kind]
   const tone =
     turn.kind === 'recall_card'
@@ -266,7 +269,7 @@ function TutorCard({ turn, onReadAloud }: { turn: TurnView; onReadAloud: () => v
       )}
       <div>
         <Markdown text={turn.message} />
-        {turn.visual && turn.visual.frames.length > 0 && <VisualSlot visual={turn.visual} />}
+        <VisualSlot itemId={itemId} turn={turn} />
       </div>
     </div>
   )
@@ -532,7 +535,7 @@ function Composer({
             type="button"
             onClick={() => setMode(m)}
             className={cx(
-              'no-drag rounded-full px-2 py-0.5 transition-colors',
+              'no-drag whitespace-nowrap rounded-full px-2 py-0.5 transition-colors',
               mode === m
                 ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
                 : 'text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-white/10'
@@ -541,10 +544,12 @@ function Composer({
             {m === 'answer' ? 'Answer' : 'How do I write…?'}
           </button>
         ))}
-        {mode === 'recall' && (
+        {mode === 'recall' ? (
           <IconButton title="Back to answering" onClick={() => setMode('answer')} className="h-5 w-5">
             <BackIcon size={12} />
           </IconButton>
+        ) : (
+          <AnimateMenu disabled={disabled} />
         )}
         <button
           type="button"
@@ -552,7 +557,7 @@ function Composer({
           aria-pressed={conv.enabled}
           title={conv.enabled ? 'Voice on: replies are read aloud. Click to turn off' : 'Voice off. Click to have replies read aloud'}
           className={cx(
-            'no-drag ml-auto flex items-center gap-1 rounded-full px-2 py-0.5 transition-colors',
+            'no-drag ml-auto flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 transition-colors',
             conv.enabled
               ? 'bg-claude-100 text-claude-800 dark:bg-claude-500/15 dark:text-claude-400'
               : 'text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-white/10'
@@ -592,6 +597,80 @@ function Composer({
       {as === 'math' && text.trim() && (
         <div className="mt-1.5 min-h-5 truncate px-1 text-sm text-zinc-700 dark:text-zinc-200">
           {mathToHtml(text) ? <MathText input={text} /> : <span className="text-xs text-zinc-400">Can't read that as math yet</span>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------- animate button ----------
+
+const ANIMATE_MORE: { action: UserAction; label: string; title: string }[] = [
+  { action: 'animate_problem', label: 'Animate the problem', title: "Watch the problem's example fill in, step by step" },
+  { action: 'animate_question', label: 'Animate the question', title: 'See the idea behind the current question' }
+]
+
+/** "Animate my code ▾": the student always chooses when to animate; Clueless never starts one itself. */
+function AnimateMenu({ disabled }: { disabled: boolean }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent): void => {
+      if (!box.current?.contains(e.target as Node)) setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    return () => window.removeEventListener('mousedown', onDown)
+  }, [open])
+
+  const run = (action: UserAction): void => {
+    setOpen(false)
+    api.action(action)
+  }
+
+  const part =
+    'no-drag flex h-6 items-center whitespace-nowrap border border-zinc-900/10 bg-white/70 text-zinc-700 transition-colors hover:border-claude-500 hover:text-zinc-950 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/15 dark:bg-black/40 dark:text-zinc-200 dark:hover:border-claude-500 dark:hover:text-white'
+
+  return (
+    <div ref={box} className="relative ml-1 flex">
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => run('animate_code')}
+        title="Animate my code: drag a box around your code, then watch it run"
+        className={cx(part, 'gap-1 rounded-l-full pl-2 pr-1.5')}
+      >
+        <PlayIcon size={10} className="text-claude-500" /> Animate
+      </button>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => setOpen(!open)}
+        title="More ways to animate"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className={cx(part, '-ml-px rounded-r-full px-1')}
+      >
+        <ChevronDownIcon size={12} />
+      </button>
+      {open && (
+        <div
+          role="menu"
+          className="absolute bottom-full right-0 z-20 mb-1 w-48 overflow-hidden rounded-lg border border-zinc-900/10 bg-white py-1 shadow-lg dark:border-white/15 dark:bg-zinc-900"
+        >
+          {ANIMATE_MORE.map((item) => (
+            <button
+              key={item.action}
+              type="button"
+              role="menuitem"
+              title={item.title}
+              onClick={() => run(item.action)}
+              className="no-drag flex w-full items-center gap-2 px-3 py-1.5 text-left text-[12.5px] text-zinc-700 hover:bg-claude-50 dark:text-zinc-200 dark:hover:bg-white/10"
+            >
+              <PlayIcon size={10} className="text-claude-500" /> {item.label}
+            </button>
+          ))}
         </div>
       )}
     </div>

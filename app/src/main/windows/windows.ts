@@ -1,10 +1,12 @@
 // The floating overlay panel and the full-screen "select an area" window.
 import { app, BrowserWindow, screen, shell, type Display } from 'electron'
 import { join } from 'node:path'
-import type { Rect } from '../../shared/contracts'
+import type { Rect, WindowMode } from '../../shared/contracts'
 
 /** The window wraps the panel (plus an 8px margin for its shadow) and follows its height. */
 export const PANEL_WIDTH = 416
+/** Explain mode ('wide'): the animation pane sits next to the conversation. */
+export const WIDE_WIDTH = 860
 const MIN_WIDTH = 320
 const MAX_WIDTH = 960
 const MARGIN = 16
@@ -80,6 +82,51 @@ export function resizePanelWidth(win: BrowserWindow, width: number, anchor: 'lef
   if (w === b.width) return
   const x = anchor === 'right' ? b.x + b.width - w : b.x
   win.setBounds({ x: Math.max(work.x, Math.min(x, work.x + work.width - w)), y: b.y, width: w, height: b.height })
+}
+
+/** Width before going wide, so leaving explain mode gives the student their own width back. */
+const widthBeforeWide = new WeakMap<BrowserWindow, number>()
+
+/** 'wide' widens the panel to the left for the animation pane; the height keeps following the panel. */
+export function setPanelMode(win: BrowserWindow, mode: WindowMode): void {
+  const { width } = win.getBounds()
+  if (mode === 'wide') {
+    if (width < WIDE_WIDTH) widthBeforeWide.set(win, width)
+    resizePanelWidth(win, Math.max(width, WIDE_WIDTH), 'right')
+  } else if (widthBeforeWide.has(win)) {
+    resizePanelWidth(win, widthBeforeWide.get(win) ?? PANEL_WIDTH, 'right')
+    widthBeforeWide.delete(win)
+  }
+}
+
+// ---------- code-mode animation ----------
+
+/** A see-through, click-through layer over `display` that draws animations on the student's code. */
+export function createStage(display: Display): BrowserWindow {
+  const win = new BrowserWindow({
+    ...display.bounds,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    focusable: false, // never steals focus from the student's editor or the panel
+    enableLargerThanScreen: true,
+    hasShadow: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    backgroundColor: '#00000000',
+    ...PANEL_TYPE,
+    webPreferences
+  })
+  win.setIgnoreMouseEvents(true) // clicks go through to the code (and the panel) underneath
+  win.setAlwaysOnTop(true, 'screen-saver')
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
+  loadRenderer(win, 'stage')
+  return win
 }
 
 // ---------- area selection ----------
