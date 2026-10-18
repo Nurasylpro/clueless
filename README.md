@@ -32,7 +32,7 @@ answer checks, memory) is built and tested; the island doesn't show it yet.
 | Part | Status |
 |---|---|
 | **Island** (pill at the top, Ctrl/Cmd+Shift+2), highlight → **Ask**, Animate On/Off | ✅ built (Windows first) |
-| **Code animation** (Claude traces the code at max effort, full-screen replay) | ✅ built |
+| **Code animation** (Claude traces the code, full-screen replay; ~15-20 s) | ✅ built |
 | Old side panel (overlay, area capture, glass UI) | parked: not shown since the island replaced it |
 | Tutor brain (Claude), hints, gaps, recap | ✅ built |
 | Answer checker, stuck detection, memory and flashcards | ✅ built, 27 tests |

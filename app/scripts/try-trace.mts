@@ -4,11 +4,12 @@
 //   npm run trace -- path/to/code.py           Animate on (max effort, full trace)
 //   npm run trace -- path/to/code.py --off     Animate off (text only)
 //   npm run trace -- path/to/code.py --json    print the whole trace as JSON
+//   npm run trace -- path/to/code.py --effort medium   force an effort (low|medium|high|xhigh|max)
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { CodeTrace, EntityValue } from '../src/shared/trace'
 import { loadEnvFiles } from '../src/main/env'
-import { Tracer } from '../src/main/island/tracer'
+import { Tracer, traceEffort, type Effort } from '../src/main/island/tracer'
 import { createTransport } from '../src/main/tutor/provider'
 
 loadEnvFiles([join(process.cwd(), '.env')])
@@ -19,16 +20,21 @@ if (!transport) {
 }
 
 const args = process.argv.slice(2)
-const file = args.find((a) => !a.startsWith('--'))
+const file = args.find((a, i) => !a.startsWith('--') && args[i - 1] !== '--effort')
 if (!file) {
   console.error('Give a code file: npm run trace -- path/to/code.py')
   process.exit(1)
 }
 const animate = !args.includes('--off')
+const effortAt = args.indexOf('--effort')
+const effort = effortAt >= 0 ? (args[effortAt + 1] as Effort) : undefined
 const snippet = readFileSync(file, 'utf8')
 
-console.log(`${transport.provider === 'bedrock' ? `Amazon Bedrock (${transport.region})` : 'Claude API'} · ${transport.model} · ${animate ? 'Animate on, max effort' : 'Animate off, high effort'}`)
-const tracer = new Tracer(transport, (line) => console.log(`  (${line})`))
+const shownEffort = effort ?? traceEffort(snippet)
+console.log(
+  `${transport.provider === 'bedrock' ? `Amazon Bedrock (${transport.region})` : 'Claude API'} · ${transport.model} · ${animate ? `Animate on, ${shownEffort} effort` : 'Animate off'}`
+)
+const tracer = new Tracer(transport, (line) => console.log(`  (${line})`), effort)
 try {
   const reply = await tracer.ask({ snippet, image: null, animate })
   console.log(`\n${reply.message}\n`)

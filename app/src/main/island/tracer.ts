@@ -13,8 +13,12 @@ import { errorMessage, TutorError, type ImageInput, type TutorTransport } from '
 import type { AskInput, TracerLike } from '../../shared/islandController'
 import { TRACE_PROMPT } from './prompt'
 
-/** Max effort can think for a long time, so stream (no HTTP timeout) and give it room. */
+/** Room for long traces; streaming keeps a long answer from hitting an HTTP timeout. */
 const MAX_TOKENS = 64000
+
+/** A trace that takes longer than this is given up on, so the island never waits forever.
+ *  (Measured on bubble sort: medium and high ~16 s, max ~88 s.) */
+export const TRACE_TIMEOUT_MS = 150_000
 
 export const traceSchema = (() => {
   const schema = JSON.parse(JSON.stringify(z.toJSONSchema(TraceWire)).replaceAll('"oneOf"', '"anyOf"'))
@@ -37,13 +41,13 @@ interface StreamingClient {
     messages: {
       stream(
         params: Record<string, unknown>,
-        options?: { fallbackState?: BetaFallbackState }
+        options?: { fallbackState?: BetaFallbackState; signal?: AbortSignal }
       ): { finalMessage(): Promise<BetaMessage> }
     }
   }
 }
 
-type Effort = 'high' | 'max'
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 interface Turn {
   text: string
@@ -62,7 +66,9 @@ export class Tracer implements TracerLike {
 
   constructor(
     private readonly transport: TutorTransport,
-    private readonly log: (line: string) => void = () => {}
+    private readonly log: (line: string) => void = () => {},
+    /** Force one effort level for animations (tests, `npm run trace --effort`); undefined = pick by code size. */
+    private readonly effortOverride: Effort | undefined = envEffort()
   ) {
     this.client = transport.client as unknown as StreamingClient
     this.useServerFallbacks = transport.serverFallbacks
@@ -75,11 +81,16 @@ export class Tracer implements TracerLike {
       'The student highlighted this:',
       numberLines(this.code)
     ].join('\n')
-    return this.request({ text, images: input.image ? [input.image] : [] }, input.animate ? 'max' : 'high')
+    return this.request({ text, images: input.image ? [input.image] : [] }, this.effortFor(input.animate, this.code))
   }
 
   followUp(text: string, animate: boolean): Promise<TraceReply> {
-    return this.request({ text: `${animate ? '[ANIMATE ON]' : '[ANIMATE OFF]'} [FOLLOW-UP] ${text}` }, animate ? 'max' : 'high')
+    return this.request({ text: `${animate ? '[ANIMATE ON]' : '[ANIMATE OFF]'} [FOLLOW-UP] ${text}` }, this.effortFor(animate, this.code))
+  }
+
+  private effortFor(animate: boolean, code: string): Effort {
+    if (this.effortOverride) return this.effortOverride
+    return animate ? traceEffort(code) : 'medium'
   }
 
   private async request(turn: Turn, effort: Effort, retries = 1): Promise<TraceReply> {
@@ -90,7 +101,11 @@ export class Tracer implements TracerLike {
       response = await this.send(effort)
     } catch (err) {
       this.messages.pop() // keep the conversation alternating user/assistant
-      throw err instanceof TutorError ? err : new TutorError(errorMessage(err), 'api')
+      if (err instanceof TutorError) throw err
+      if (err instanceof Anthropic.APIUserAbortError) {
+        throw new TutorError(`That took longer than ${TRACE_TIMEOUT_MS / 1000} s, so I stopped. Try highlighting less code.`, 'api')
+      }
+      throw new TutorError(errorMessage(err), 'api')
     }
 
     this.pendingToolUseId = null
@@ -165,7 +180,7 @@ export class Tracer implements TracerLike {
   }
 
   private async stream(params: Record<string, unknown>): Promise<BetaMessage> {
-    const options = { fallbackState: this.fallbackState }
+    const options = { fallbackState: this.fallbackState, signal: AbortSignal.timeout(TRACE_TIMEOUT_MS) }
     try {
       if (this.useServerFallbacks) {
         // If a safety classifier declines, the API re-runs the request on a fallback model.
@@ -188,4 +203,19 @@ export class Tracer implements TracerLike {
       return this.stream(params)
     }
   }
+}
+
+const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
+
+/** CLUELESS_TRACE_EFFORT=max (in .env) forces one effort level for every animation. */
+function envEffort(env: Record<string, string | undefined> = process.env): Effort | undefined {
+  const value = env.CLUELESS_TRACE_EFFORT?.trim().toLowerCase()
+  return EFFORTS.find((e) => e === value)
+}
+
+/** Picked from the size of the highlight. Measured on bubble sort: medium and high both took ~16 s and
+ *  traced it correctly; max took ~88 s for a few extra "loop finished" steps. So max is opt-in only. */
+export function traceEffort(code: string): Effort {
+  const lines = code.split(String.fromCharCode(10)).filter((l) => l.trim()).length
+  return lines <= 8 ? 'medium' : 'high'
 }
