@@ -1,24 +1,28 @@
 import { MotionConfig } from 'motion/react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { AppStatus, MemoryView, SessionView, StageShow, WindowMode } from '../../shared/contracts'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { AppStatus, SessionView, StageShow, WindowMode } from '../../shared/contracts'
 import { api, isMock } from './api'
 import { mock as islandMock } from './island/api'
-import { AskButton, IslandScreen } from './island/IslandScreen'
+import { AskCard } from './island/AskCard'
+import { useNarration } from './island/useNarration'
+import { AskButton, IslandScreen, useIslandView } from './island/IslandScreen'
 import { MockPage } from './island/MockPage'
 import { AreaSelector } from './screens/AreaSelector'
 import { Banners, CompactBar, EmptyState, GLASS_ALPHA, Header, type Glass } from './screens/Home'
-import { ReviewScreen } from './screens/Review'
+import { GapsScreen } from './screens/Gaps'
 import { SessionScreen, type ComposerMode } from './screens/Session'
 import { VoiceStrip } from './components/MicButton'
 import { useVoiceConversation } from './voice/useVoiceConversation'
 import { AnimationPane } from './visuals/AnimationPane'
 import { CodeOverlay, StageScreen } from './visuals/CodeOverlay'
 import { PlaybackContext, playsOnCode, type Playback, type Playing } from './visuals/playback'
+import { speech } from './voice/speaker'
+import { toSpeech } from '../../shared/speechText'
 
 // One renderer, several windows, picked by the URL hash:
 //   (none)   the tutor panel        #select  drag a box around the problem
-//   #stage   code-mode animation over the student's code
-//   #island  the island (pill, card, full-screen trace)   #ask  the Ask button next to the cursor
+//   #stage   animations drawn over the student's code (the tutor's, and Ask's step-by-step runs)
+//   #island  the island's pill   #ask  the Ask button next to the cursor
 // In a plain browser (`npm run ui`) the panel runs on mock data; add `?island` for the island demo.
 export function App() {
   const hash = window.location.hash
@@ -55,23 +59,20 @@ function windowMode(compact: boolean, playing: Playing | null): WindowMode {
 function Overlay() {
   const [status, setStatus] = useState<AppStatus | null>(null)
   const [session, setSession] = useState<SessionView | null>(null)
-  const [screen, setScreen] = useState<'main' | 'review'>('main')
+  const [screen, setScreen] = useState<'main' | 'gaps'>('main')
   const [compact, setCompact] = useState(false)
-  const [dueCards, setDueCards] = useState(0)
-  const [totalCards, setTotalCards] = useState(0)
   const [glass, setGlass] = useState<Glass>(loadGlass)
   const [size, setSize] = useState<PanelSize>(loadSize)
   const [playing, setPlaying] = useState<Playing | null>(null)
   const [mockStage, setMockStage] = useState<StageShow | null>(null)
+  const islandView = useIslandView()
+  const asking = Boolean(islandView && islandView.phase !== 'idle')
+  useNarration(islandView)
 
   useEffect(() => {
     if (isMock) document.body.classList.add('mock-desktop')
     void api.getStatus().then(setStatus)
     void api.getSession().then(setSession)
-    void api.getMemory().then((m) => {
-      setDueCards(m.dueCards.length)
-      setTotalCards(m.totalCards)
-    })
     const offSession = api.onSession(setSession)
     const offStatus = api.onStatus(setStatus)
     // Browser mock mode has no stage window: draw code-mode animations in this page instead.
@@ -116,6 +117,8 @@ function Overlay() {
   )
   const stopPlayback = useRef(playback.stop)
   stopPlayback.current = playback.stop
+  const playingRef = useRef(playing)
+  playingRef.current = playing
 
   // A new problem (or none): close any animation, back to the main screen, full size.
   useEffect(() => {
@@ -126,13 +129,13 @@ function Overlay() {
     setMode('answer')
   }, [session?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // New flashcards after a recap.
+  // A new Ask: its answer shows here, so open the panel up.
   useEffect(() => {
-    if (session?.recap) void api.getMemory().then((m) => {
-      setDueCards(m.dueCards.length)
-      setTotalCards(m.totalCards)
-    })
-  }, [session?.recap])
+    if (!asking) return
+    setScreen('main')
+    setCompact(false)
+    api.setWindowMode(windowMode(false, playingRef.current))
+  }, [asking])
 
   // The panel and its window always change size together (the pill has a smaller window).
   const setCompactMode = (next: boolean): void => {
@@ -157,11 +160,6 @@ function Overlay() {
       if (compact) setCompactMode(false) // open the panel to show the reply
     }
   })
-
-  const onMemory = useCallback((m: MemoryView) => {
-    setDueCards(m.dueCards.length)
-    setTotalCards(m.totalCards)
-  }, [])
 
   // The window is exactly as tall as the panel: small when there's little to show.
   const panel = useRef<HTMLDivElement>(null)
@@ -243,13 +241,11 @@ function Overlay() {
         ) : (
           <Header
             compact={compact}
-            dueCards={dueCards}
-            totalCards={totalCards}
             stuck={session?.stuck ?? null}
             glass={glass}
             onGlass={changeGlass}
             onToggleCompact={toggleCompact}
-            onOpenReview={() => setScreen('review')}
+            onOpenGaps={() => setScreen('gaps')}
           />
         )}
         {!compact && (
@@ -259,12 +255,14 @@ function Overlay() {
             <div className="panel-body">
               {explain && <AnimationPane playing={explain} onReplay={playback.replay} onClose={playback.stop} />}
               <div className="panel-main">
-                {screen === 'review' ? (
-                  <ReviewScreen onBack={() => setScreen('main')} onChange={onMemory} />
+                {screen === 'gaps' ? (
+                  <GapsScreen onBack={() => setScreen('main')} />
+                ) : asking ? (
+                  <AskCard view={islandView!} onReadAloud={(markdown) => speech.speak(toSpeech(markdown))} />
                 ) : session ? (
                   <SessionScreen
                     session={session}
-                    onOpenReview={() => setScreen('review')}
+                    onOpenGaps={() => setScreen('gaps')}
                     conv={conv}
                     mode={mode}
                     setMode={setMode}

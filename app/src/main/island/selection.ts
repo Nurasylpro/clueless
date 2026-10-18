@@ -13,10 +13,12 @@ export interface Point {
 export interface SelectionHandlers {
   /** True when the point (DIP) is on one of Clueless's own windows: those clicks are ignored. */
   isOwnWindowAt(p: Point): boolean
-  /** Highlighting is off right now (for example, during the full-screen animation). */
+  /** Highlighting is off right now (the pill's switch). */
   paused(): boolean
-  /** Text was highlighted; `at` is the cursor (DIP) where the mouse was released. */
-  onSelection(text: string, at: Point): void
+  /** Text was highlighted: `at` is where the mouse was released, `from` where the drag started (DIP). */
+  onSelection(text: string, at: Point, from: Point): void
+  /** The mouse wheel turned, or Page Up / Page Down: what's on screen moved. */
+  onScroll(): void
   /** Any other click or key press: the Ask button should go away. */
   onOtherInput(at: Point | null): void
 }
@@ -28,6 +30,7 @@ export class SelectionWatcher {
   private listening = false
   private running = false
   private down: Press | null = null
+  private downAt: Point | null = null
   private probing = false
 
   constructor(private readonly handlers: SelectionHandlers) {}
@@ -37,8 +40,14 @@ export class SelectionWatcher {
     if (!this.listening) {
       uIOhook.on('mousedown', (e) => this.onDown(e))
       uIOhook.on('mouseup', (e) => void this.onUp(e))
-      uIOhook.on('keydown', () => {
-        if (this.running && !this.probing) this.handlers.onOtherInput(null)
+      uIOhook.on('keydown', (e) => {
+        if (!this.running || this.probing) return
+        this.handlers.onOtherInput(null)
+        if (e.keycode === UiohookKey.PageUp || e.keycode === UiohookKey.PageDown) this.handlers.onScroll()
+      })
+      uIOhook.on('wheel', () => {
+        // scrolling Clueless's own panel doesn't move the student's code
+        if (this.running && !this.handlers.isOwnWindowAt(screen.getCursorScreenPoint())) this.handlers.onScroll()
       })
       this.listening = true
     }
@@ -61,19 +70,22 @@ export class SelectionWatcher {
       return
     }
     this.down = { x: e.x, y: e.y }
+    this.downAt = at
     this.handlers.onOtherInput(at)
   }
 
   private async onUp(e: UiohookMouseEvent): Promise<void> {
     if (!this.running || this.probing || e.button !== LEFT_BUTTON || this.handlers.paused()) return
     const down = this.down
+    const downAt = this.downAt
     this.down = null
     const at = screen.getCursorScreenPoint()
     if (this.handlers.isOwnWindowAt(at)) return
     if (!isSelectGesture(down, { x: e.x, y: e.y, clicks: e.clicks })) return
     await sleep(60) // let the app finish updating its selection
     const text = await this.copySelection()
-    if (text) this.handlers.onSelection(text, at)
+    // a double or triple click selects where it was clicked
+    if (text) this.handlers.onSelection(text, at, e.clicks >= 2 || !downAt ? at : downAt)
   }
 
   /** Press Ctrl/Cmd+C for the student, read what got copied, then restore their clipboard. */

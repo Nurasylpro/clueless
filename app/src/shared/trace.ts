@@ -1,7 +1,7 @@
 // A code trace: what "Ask" on highlighted code comes back with when Animate is on.
-// Claude reads the highlighted code and writes down every step it runs: which line, which part
-// of the line, and the new value of every variable ("entity") that changed. The app draws the
-// entities as simple figures on the left and the code on the right, spotlighting each step.
+// Every step the code runs: which line, which part of the line, and the new value of every
+// variable ("entity") that changed. Python is run for real to get it (src/main/run); for other
+// languages Claude reads the code and writes the steps down itself.
 //
 // The wire schema has no unions (fast to compile as a structured output); "nothing" is "" or [].
 import { z } from 'zod'
@@ -45,7 +45,12 @@ export const TraceWire = z.object({
       reads: z.array(z.string()), // ids of entities this step reads
       updates: z.array(z.object({ entity: z.string(), value: EntityValue })) // full new values
     })
-  ) // [] = no animation (Animate off, or the highlight isn't code)
+  ), // [] = no animation (Animate off, the highlight isn't code, or the app runs it: see run)
+  // [RUN] only: how the app runs the highlighted Python itself. "" otherwise.
+  run: z.object({
+    setup: z.string(), // runs first: the inputs the code needs
+    call: z.string() // runs after it to start it, e.g. "Solution().twoSum([2, 7, 11, 15], 9)"
+  })
 })
 
 export type EntityKind = z.infer<typeof EntityKind>

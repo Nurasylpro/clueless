@@ -9,6 +9,7 @@ import { speech } from './speaker'
 import type { SpeechSnapshot } from './speech'
 import { useSpeech } from './useSpeech'
 import { useVoiceInput, type VoiceInput } from './useVoiceInput'
+import { useVoiceMode, voiceMode } from './voiceMode'
 
 export interface VoiceConversation {
   /** Voice mode: replies are read aloud and the mic is a click away. */
@@ -26,16 +27,6 @@ export interface VoiceConversation {
   readAloud(markdown: string): void
 }
 
-const STORAGE_KEY = 'clueless.voiceMode'
-
-function loadEnabled(): boolean {
-  try {
-    return localStorage.getItem(STORAGE_KEY) === 'on'
-  } catch {
-    return false
-  }
-}
-
 export function useVoiceConversation({
   session,
   disabled,
@@ -45,7 +36,7 @@ export function useVoiceConversation({
   disabled: boolean // the tutor is busy
   onSpoken: (text: string) => void
 }): VoiceConversation {
-  const [enabled, setEnabledState] = useState(loadEnabled)
+  const enabled = useVoiceMode()
   const [processing, setProcessing] = useState(false)
   const snap = useSpeech()
   const sawBusy = useRef(false)
@@ -61,12 +52,7 @@ export function useVoiceConversation({
   live.current = { enabled, disabled, input }
 
   const setEnabled = useCallback((on: boolean): void => {
-    setEnabledState(on)
-    try {
-      localStorage.setItem(STORAGE_KEY, on ? 'on' : 'off')
-    } catch {
-      // storage unavailable: the setting just won't persist
-    }
+    voiceMode.set(on)
     if (!on) {
       // Voice off: mic off and silence, right away.
       live.current.input.cancel()

@@ -1,13 +1,19 @@
 // Browser mock mode (`npm run ui`): a fake LeetCode page with the island on top. Highlight some
-// code or text with the mouse, click Ask. Ctrl+Shift+2 shows the island again after Hide.
+// code or text with the mouse and click Ask: the answer shows in a stand-in panel and, with
+// Animate on, the code runs step by step right on the page. Ctrl+Shift+3 shows the pill after Hide.
 import { useEffect, useState } from 'react'
+import type { CodeSpot } from '../../../shared/contracts'
+import { normalizeSnippet } from '../../../shared/trace'
 import type { IslandMock } from './mock'
-import { AskButton, IslandShell, useIslandView } from './IslandScreen'
+import { AskCard } from './AskCard'
+import { AskButton, Pill, useIslandView } from './IslandScreen'
 import { MOCK_CODE } from './fixtures'
-import { TraceOverlay } from './TraceOverlay'
+import { TraceStage } from './TraceStage'
+import { useNarration } from './useNarration'
 
 export function MockPage({ mock }: { mock: IslandMock }) {
   const view = useIslandView()
+  useNarration(view)
   const [hidden, setHidden] = useState(false)
   const [ask, setAsk] = useState<{ x: number; y: number } | null>(null)
 
@@ -15,8 +21,7 @@ export function MockPage({ mock }: { mock: IslandMock }) {
     document.body.classList.add('mock-desktop')
     const offHidden = mock.onHidden(setHidden)
     const onKey = (e: KeyboardEvent): void => {
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === '@') mock.show()
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === 'Digit2') mock.show()
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === 'Digit3') mock.show()
       setAsk(null)
     }
     // Like the real app: once a highlight stops changing, show Ask where it ends.
@@ -27,18 +32,21 @@ export function MockPage({ mock }: { mock: IslandMock }) {
         const selection = window.getSelection()
         const text = selection?.toString() ?? ''
         if (!selection || !text.trim() || selection.anchorNode?.parentElement?.closest('[data-island]')) return setAsk(null)
-        const rects = selection.getRangeAt(0).getClientRects()
+        const rects = [...selection.getRangeAt(0).getClientRects()].filter((r) => r.width > 0 && r.height > 0)
         const end = rects[rects.length - 1]
-        mock.select(text)
+        mock.select(text, spotOf(rects, text))
         setAsk(end ? { x: end.right + 6, y: end.bottom + 8 } : null)
       }, 350)
     }
+    const onWheel = (): void => mock.scrolled()
     window.addEventListener('keydown', onKey)
+    window.addEventListener('wheel', onWheel, { passive: true })
     document.addEventListener('selectionchange', onSelection)
     return () => {
       offHidden()
       clearTimeout(settle)
       window.removeEventListener('keydown', onKey)
+      window.removeEventListener('wheel', onWheel)
       document.removeEventListener('selectionchange', onSelection)
     }
   }, [mock])
@@ -50,21 +58,20 @@ export function MockPage({ mock }: { mock: IslandMock }) {
     return () => clearTimeout(t)
   }, [ask])
 
-  const playing = view?.phase === 'playing' && view.trace
   return (
     <div className="h-full overflow-hidden">
       <FakeLeetCode />
-      {!hidden && view && !playing && (
+      {!hidden && view && (
         <div data-island className="fixed left-1/2 top-1.5 z-40 -translate-x-1/2">
-          <IslandShell view={view} />
+          <Pill view={view} />
         </div>
       )}
       {hidden && (
         <div className="fixed left-1/2 top-3 z-40 -translate-x-1/2 rounded-full bg-black/60 px-3 py-1 text-xs text-zinc-400">
-          Hidden. Press Ctrl+Shift+2 to show the island.
+          Hidden. Press Ctrl+Shift+3 to show the pill.
         </div>
       )}
-      {ask && !hidden && (
+      {ask && !hidden && view?.askOnHighlight && (
         <div data-island className="fixed z-50" style={{ left: ask.x, top: ask.y }}>
           <AskButton
             onAsk={() => {
@@ -74,9 +81,34 @@ export function MockPage({ mock }: { mock: IslandMock }) {
           />
         </div>
       )}
-      {playing && <TraceOverlay trace={view.trace!} onClose={() => mock.finishAnimation()} />}
+      {/* a stand-in for the panel, where the answer shows */}
+      {view && view.phase !== 'idle' && (
+        <div data-island className="glass-panel fixed bottom-4 right-4 z-40 w-[400px] overflow-hidden rounded-2xl border border-white/10 bg-zinc-900/95 text-zinc-100 shadow-2xl">
+          <AskCard view={view} />
+        </div>
+      )}
+      {view && <TraceStage view={view} avoid={panelRect()} />}
     </div>
   )
+}
+
+/** Where the highlighted lines are, from the browser's own selection boxes. */
+function spotOf(rects: DOMRect[], text: string): CodeSpot | null {
+  if (!rects.length) return null
+  const lines = normalizeSnippet(text).split('\n').length
+  // Text boxes are shorter than lines: the pitch comes from the first and last line's tops.
+  const first = Math.min(...rects.map((r) => r.top))
+  const last = Math.max(...rects.map((r) => r.top))
+  const textHeight = rects[0].height
+  const lineHeight = lines > 1 ? (last - first) / (lines - 1) : textHeight * 1.5
+  const left = Math.min(...rects.map((r) => r.left))
+  const right = Math.max(...rects.map((r) => r.right))
+  return { displayId: 0, left: left - 6, width: right - left + 12, top: first - (lineHeight - textHeight) / 2, lineHeight, lines }
+}
+
+function panelRect() {
+  const r = document.querySelector('.glass-panel')?.getBoundingClientRect()
+  return r ? { x: r.x, y: r.y, width: r.width, height: r.height } : null
 }
 
 /** A LeetCode-like page: the problem on the left, the student's code on the right. Highlightable. */

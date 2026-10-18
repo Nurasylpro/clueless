@@ -105,7 +105,7 @@ describe('SessionController', () => {
     expect(tutor.sent.at(-1)?.tag).toBe('REVEAL')
   })
 
-  it('records gaps and turns the recap into flashcards', async () => {
+  it('records the gaps and the session when the recap comes', async () => {
     const { controller, tutor, memory, last } = setup()
     await controller.startProblem({ text: 'p' })
     tutor.replies.push({
@@ -120,12 +120,11 @@ describe('SessionController', () => {
       recap: {
         explainBack: 'Why u = x²?',
         gaps: [{ type: 'recall_slip', topic: 'integration by parts formula' }],
-        flashcards: [{ front: '∫u dv = ?', back: 'uv − ∫v du' }],
         similarProblem: '∫ x² cos x dx'
       }
     })
     await controller.action('finish')
-    expect(last()!.recap?.cardsAdded).toBe(1)
+    expect(last()!.recap?.gaps).toHaveLength(1)
     expect(memory.view().gaps[0].topic).toBe('integration by parts formula')
     expect(memory.view().sessions).toBe(1)
   })

@@ -307,15 +307,12 @@ export class SessionController {
     view.thread.push({ id: itemId, role: 'tutor', turn: toTurnView(turn, animation), at: Date.now() })
 
     if (reply.recap && this.problem) {
-      const subject = this.problem.subject
-      const cardsAdded = this.deps.memory.addCards(subject, this.problem.title, reply.recap.flashcards)
       view.recap = {
         ...reply.recap,
         hintsUsed: view.hintsUsed,
         attempts: view.attempts,
         solved: view.solved,
         revealed: view.revealed,
-        cardsAdded,
         afterItemId: itemId
       }
       this.finishRecord()

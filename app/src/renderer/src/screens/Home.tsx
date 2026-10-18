@@ -7,6 +7,7 @@ import {
   CloseIcon,
   ExpandIcon,
   FileIcon,
+  GapsIcon,
   GearIcon,
   LayersIcon,
   Logo,
@@ -28,22 +29,18 @@ const NEXT_GLASS: Record<Glass, Glass> = { glass: 'clear', clear: 'solid', solid
 
 export function Header({
   compact,
-  dueCards,
-  totalCards,
   stuck,
   glass,
   onGlass,
   onToggleCompact,
-  onOpenReview
+  onOpenGaps
 }: {
   compact: boolean
-  dueCards: number
-  totalCards: number
   stuck: StuckState | null
   glass: Glass
   onGlass: (g: Glass) => void
   onToggleCompact: () => void
-  onOpenReview: () => void
+  onOpenGaps: () => void
 }) {
   const [menu, setMenu] = useState(false)
   return (
@@ -64,19 +61,9 @@ export function Header({
             <ScanIcon size={13} /> Ask
           </Button>
         )}
-        <button
-          type="button"
-          onClick={onOpenReview}
-          title={`Flashcards: ${dueCards} due of ${totalCards}. Open your flashcards and gap map`}
-          className={cx(
-            'no-drag mr-1 h-6 rounded-full border px-2 text-[11px] font-medium tabular-nums transition-colors',
-            dueCards > 0
-              ? 'border-claude-400/60 text-claude-600 hover:bg-claude-500/10 dark:text-claude-300'
-              : 'border-zinc-900/15 text-zinc-600 hover:bg-zinc-900/5 dark:border-white/15 dark:text-zinc-300 dark:hover:bg-white/10'
-          )}
-        >
-          {dueCards}/{totalCards}
-        </button>
+        <HeaderButton title="Your gaps" onClick={onOpenGaps}>
+          <GapsIcon size={15} />
+        </HeaderButton>
         <HeaderButton title={`Transparency: ${glass} (click to change)`} onClick={() => onGlass(NEXT_GLASS[glass])}>
           <LayersIcon size={14} className={glass === 'solid' ? '' : glass === 'glass' ? 'opacity-80' : 'opacity-50'} />
         </HeaderButton>

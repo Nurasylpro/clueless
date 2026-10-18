@@ -190,11 +190,8 @@ export function resolveAreaSelection(rect: Rect | null): void {
 
 // ---------- the island ----------
 
-export type IslandMode = 'pill' | 'card' | 'full'
-
-/** The island: one see-through window that is the pill (top center), the pill + a text card, or
- *  the whole screen during an animation. It shows without taking focus, so the app the student
- *  is in (and their highlight) stays active. */
+/** The island: a see-through window with the pill, at the top center of the screen. It shows
+ *  without taking focus, so the app the student is in (and their highlight) stays active. */
 export function createIsland(): BrowserWindow {
   const win = new BrowserWindow({
     width: 320,
@@ -223,12 +220,8 @@ export function createIsland(): BrowserWindow {
   return win
 }
 
-/** Pill and card: `size` is the content, centered at the top of the display. Full: the whole display. */
-export function placeIsland(win: BrowserWindow, display: Display, mode: IslandMode, size: { width: number; height: number }): void {
-  if (mode === 'full') {
-    win.setBounds(display.bounds)
-    return
-  }
+/** `size` is the pill as measured by its page, centered at the top of the display. */
+export function placeIsland(win: BrowserWindow, display: Display, size: { width: number; height: number }): void {
   const work = display.workArea
   const width = Math.min(Math.ceil(size.width), work.width)
   const height = Math.min(Math.ceil(size.height), work.height - 16)

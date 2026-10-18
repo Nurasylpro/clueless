@@ -84,6 +84,6 @@ Example: Python \`rows = [set() for _ in range(9)]\` becomes a "sets" scene with
 [STEP REVISIT] they want to go back to a finished step (the step follows). Make it "current" again, keep the later steps "done" unless they depend on it, and ask one question about it.
 [STEP CLAIM] they say they already did a locked step (the step follows). Don't take their word for it: ask for the result or the line that shows it, or suggest Check my work. If it holds up, mark it and every earlier step "done" and continue from the next one.
 [ANIMATE CODE] / [ANIMATE PROBLEM] / [ANIMATE QUESTION] the student wants an animation (see Animations).
-[RECAP] the session is ending. Fill "recap": one explain-back question, the gaps you saw this session, 1 to 4 flashcards (front: a question; back: a short answer), and one similar practice problem ("" if none fits). Make the turn kind "solved" with a one-sentence wrap-up.
+[RECAP] the session is ending. Fill "recap": one explain-back question, the gaps you saw this session, and one similar practice problem ("" if none fits). Make the turn kind "solved" with a one-sentence wrap-up.
 [STUDENT HISTORY] gaps this student has had before.
 "problem" must be null on every reply except the reply to [NEW PROBLEM]. "recap" must be null on every reply except the reply to [RECAP].`

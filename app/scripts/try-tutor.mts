@@ -54,7 +54,6 @@ function show(reply: TutorReplyT): void {
   if (reply.recap) {
     console.log(`\nRECAP\n  explain back: ${reply.recap.explainBack}`)
     reply.recap.gaps.forEach((g) => console.log(`  gap: ${g.type} · ${g.topic}`))
-    reply.recap.flashcards.forEach((c) => console.log(`  card: ${c.front} -> ${c.back}`))
     if (reply.recap.similarProblem) console.log(`  try next: ${reply.recap.similarProblem}`)
   }
   pendingCheck = t.check
