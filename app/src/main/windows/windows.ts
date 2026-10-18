@@ -131,3 +131,87 @@ export function selectArea(display: Display): Promise<Rect | null> {
 export function resolveAreaSelection(rect: Rect | null): void {
   finishSelection?.(rect)
 }
+
+// ---------- the island ----------
+
+export type IslandMode = 'pill' | 'card' | 'full'
+
+/** The island: one see-through window that is the pill (top center), the pill + a text card, or
+ *  the whole screen during an animation. It shows without taking focus, so the app the student
+ *  is in (and their highlight) stays active. */
+export function createIsland(): BrowserWindow {
+  const win = new BrowserWindow({
+    width: 320,
+    height: 64,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    enableLargerThanScreen: true,
+    hasShadow: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    backgroundColor: '#00000000',
+    title: 'Clueless',
+    ...PANEL_TYPE,
+    webPreferences
+  })
+  win.setAlwaysOnTop(true, 'screen-saver')
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
+  // Never call win.setContentProtection(true): Clueless stays visible on screen share by design.
+  loadRenderer(win, 'island')
+  return win
+}
+
+/** Pill and card: `size` is the content, centered at the top of the display. Full: the whole display. */
+export function placeIsland(win: BrowserWindow, display: Display, mode: IslandMode, size: { width: number; height: number }): void {
+  if (mode === 'full') {
+    win.setBounds(display.bounds)
+    return
+  }
+  const work = display.workArea
+  const width = Math.min(Math.ceil(size.width), work.width)
+  const height = Math.min(Math.ceil(size.height), work.height - 16)
+  win.setBounds({ x: Math.round(work.x + (work.width - width) / 2), y: work.y + 6, width, height })
+}
+
+export const ASK_BUTTON_SIZE = { width: 104, height: 48 }
+
+/** The little "Ask" button that appears next to the cursor after a highlight. Never takes focus. */
+export function createAskButton(): BrowserWindow {
+  const win = new BrowserWindow({
+    ...ASK_BUTTON_SIZE,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    focusable: false,
+    hasShadow: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    backgroundColor: '#00000000',
+    ...PANEL_TYPE,
+    webPreferences
+  })
+  win.setAlwaysOnTop(true, 'screen-saver', 2) // above the island
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
+  loadRenderer(win, 'ask')
+  return win
+}
+
+/** Just below and right of where the mouse was released, kept on screen. */
+export function placeAskButton(win: BrowserWindow, at: { x: number; y: number }, display: Display): void {
+  const work = display.workArea
+  const { width, height } = ASK_BUTTON_SIZE
+  const x = Math.max(work.x, Math.min(at.x + 6, work.x + work.width - width))
+  const y = Math.max(work.y, Math.min(at.y + 12, work.y + work.height - height))
+  win.setBounds({ x, y, width, height })
+}

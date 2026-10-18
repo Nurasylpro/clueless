@@ -38,6 +38,18 @@
 - [x] Terminal tutor (`npm run try`)
 - [x] 33 unit tests, typecheck, build, smoke test of the real app and the packaged macOS app
 
+## The island + code animation ✅
+
+- [x] Runs in the background; **Ctrl/Cmd+Shift+2** shows / hides a pill at the top of the screen (Animate On/Off · Mic (soon) · Hide)
+- [x] Highlight text in any app → an **Ask** button appears next to the cursor (mouse hook while the island shows; clipboard restored)
+- [x] Ask → Claude Opus 5.5 traces the highlighted code (effort picked by code size, `CLUELESS_TRACE_EFFORT` overrides, 150 s limit): every step, every variable value, which part of which line
+- [x] Animate on: short text in the island → 4 s → full-screen dimmed overlay, variables as simple figures on the left, the code on the right with a bright box on the running part; changes light up; the last step freezes until a click
+- [x] Animate off: text answer with a follow-up box; stays until closed
+- [x] `npm run ui` runs the island on a fake LeetCode page; `npm run trace -- file.py` checks a trace in the terminal
+- [ ] Try it on real LeetCode problems on Windows and tune the pace (`STEP_MS` in `TraceOverlay.tsx`)
+- [ ] macOS: Accessibility permission for the mouse hook
+- [ ] "Animate the problem" (later)
+
 ## Ali (you), before the demo
 
 - [ ] Get Bedrock access:

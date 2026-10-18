@@ -2,13 +2,19 @@
 
 A small study helper that sits on top of whatever you're working on.
 
-When you're stuck on a problem, press `Cmd/Ctrl + Shift + Space`. Clueless looks at the problem on your
-screen and helps you work through it with questions and small hints, one step at a time, instead of
-giving you the answer.
+Clueless runs in the background and shows up as a small **island** at the top of the screen. Press
+`Cmd/Ctrl + Shift + 2` to show it, **highlight some code** in any app (LeetCode, your editor), and click the
+**Ask** button that appears next to the cursor.
 
-It works with code, math, physics and most other problem sets, on macOS and Windows.
+- **Animate on:** a short text, then 4 seconds later the screen dims and your code runs step by step.
+  Every variable is a simple figure on the left, your code is on the right, a bright box follows the part
+  that runs, and whatever changes lights up. Click anywhere when it's done.
+- **Animate off:** a short explanation in the island, with a box for follow-up questions.
 
-## What it does
+It explains your code; it doesn't write your solution. The original tutor (questions, hints, answer
+checks, recap, flashcards, voice) is still in the repo, but the island doesn't show it yet.
+
+## What the tutor does (not shown in the island yet)
 
 - Reads the problem from your screen, a selected area, or text you paste in
 - Breaks it into steps and asks one question at a time
@@ -60,17 +66,20 @@ npm run dev
 - The first time you use it, allow Screen Recording in System Settings → Privacy & Security for the
   app you start it from, then restart it.
 
-**Shortcuts:**
-- `Cmd/Ctrl + Shift + Space`: read the screen
-- `Cmd/Ctrl + Shift + 2`: select just the problem
-- `Esc`: hide the panel
+**Shortcut:** `Cmd/Ctrl + Shift + 2` shows or hides the island. While it shows, clueless presses
+`Cmd/Ctrl + C` for you right after you highlight text, reads it, and puts your clipboard back. (In a terminal
+that would stop a running program, so hide the island there.) On macOS, also allow Accessibility so it
+can notice your highlights.
+
+**Windows, PowerShell:** if `npm` says scripts are disabled, use `npm.cmd` (for example `npm.cmd run dev`).
 
 ## Commands
 
 | Command | |
 |---|---|
 | `npm run dev` | run the app |
-| `npm run ui` | just the interface, in a browser, with a sample session (no setup needed) |
+| `npm run ui` | the island in a browser, over a fake LeetCode page with a fake Claude (no setup needed) |
+| `npm run trace -- code.py` | Claude traces a code file in the terminal, exactly what the animation plays (`--off`, `--json`, `--effort medium`) |
 | `npm run try -- "problem"` | talk to the tutor in the terminal (`--image file.png` for a screenshot) |
 | `npm test` | unit tests |
 | `npm run typecheck` | type checks |
@@ -80,17 +89,18 @@ npm run dev
 
 ```
 app/src/
-  main/       app shell: windows, hotkeys, screen capture, the tutoring loop
-    tutor/    Claude calls and the tutor's instructions
+  main/       app shell: the island, hotkey, windows, screen capture
+    island/   noticing highlights, and Claude tracing the highlighted code
+    tutor/    Claude calls and the tutor's instructions (the tutoring loop, parked)
     checker/  answer checking (math.js)
     stuck/    stuck detection
     memory/   recaps, flashcards, gaps
-  renderer/   the interface (React)
-  shared/     types shared by both
+  renderer/   the interface (React); island/ is the pill, the card and the animation
+  shared/     types shared by both, the code-trace format, the island's state machine
 ```
 
-Built with Electron, React, TypeScript, Tailwind, Claude (on Amazon Bedrock or the Claude API),
-math.js, KaTeX and ts-fsrs. [SPEC.md](SPEC.md) has the design notes and
+Built with Electron, React, TypeScript, Tailwind, Motion (animations), uiohook-napi (noticing highlights),
+Claude (on Amazon Bedrock or the Claude API), math.js, KaTeX and ts-fsrs. [SPEC.md](SPEC.md) has the design notes and
 [BUILD_PLAN.md](BUILD_PLAN.md) has what's left.
 
 Made by Ali, Nuris, Rasim and Nurassyl at the Lehigh hackathon.

@@ -1,326 +1,224 @@
-// Clueless main process: windows, hotkeys, screen capture and IPC around the session controller.
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, shell, systemPreferences } from 'electron'
+// Clueless main process. Runs in the background; Ctrl/Cmd+Shift+2 shows the island (a pill at the
+// top of the screen). While it shows, highlighting text anywhere brings up an Ask button next to
+// the cursor. Ask -> Claude reads the highlight (and the screen) -> a short text in the island ->
+// with Animate on, 4 s later the island fills the screen and animates the code step by step.
+import { app, BrowserWindow, globalShortcut, ipcMain, Menu, screen, type Display, type Rectangle } from 'electron'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import {
-  IPC,
-  type AppStatus,
-  type CardRating,
-  type InputKind,
-  type Rect,
-  type SessionView,
-  type StepIntent,
-  type Subject,
-  type UserAction
-} from '../shared/contracts'
-import {
-  activeDisplay,
-  captureDisplay,
-  cropToRect,
-  grayThumbnail,
-  screenAccess,
-  toModelImage,
-  windowTitles
-} from './capture/capture'
+import { ISLAND_IPC, type IslandView } from '../shared/contracts'
+import { IslandController, type ScreenImage } from '../shared/islandController'
+import { activeDisplay, captureDisplay, toModelImage } from './capture/capture'
 import { loadEnvFiles } from './env'
-import { MemoryStore } from './memory/store'
-import { SessionController } from './session'
-import { StuckDetector } from './stuck/detector'
-import { createTransport, providerInfo } from './tutor/provider'
-import { Tutor, type ImageInput } from './tutor/tutor'
-import { VoiceManager, type SocketLike } from './voice/deepgram'
-import { ElevenLabs } from './voice/elevenlabs'
+import { SelectionWatcher, type Point } from './island/selection'
+import { Tracer } from './island/tracer'
+import { createTransport } from './tutor/provider'
 import { createTray } from './windows/tray'
-import { createOverlay, fitPanelHeight, resizePanelWidth, resolveAreaSelection, selectArea } from './windows/windows'
+import { createAskButton, createIsland, placeAskButton, placeIsland, type IslandMode } from './windows/windows'
 
-const HOTKEYS = { ask: 'CommandOrControl+Shift+Space', area: 'CommandOrControl+Shift+2' }
-const VOICE_HOTKEY = 'CommandOrControl+Shift+1'
+const HOTKEY = 'CommandOrControl+Shift+2'
+const ASK_BUTTON_MS = 4000
 const SMOKE = process.env.CLUELESS_SMOKE === '1'
 
-let overlay: BrowserWindow | null = null
-let capturing = false
-const hotkeyErrors: string[] = []
+let island: BrowserWindow | null = null
+let askButton: BrowserWindow | null = null
+let islandDisplay: Display
+let islandMode: IslandMode = 'pill'
+let contentSize = { width: 320, height: 64 } // what the island's UI measured for the pill / card
+let pendingSnippet: string | null = null
+let askTimer: NodeJS.Timeout | null = null
 
-const userEnvFile = (): string => join(app.getPath('userData'), '.env')
 const log = (line: string): void => console.log(`[clueless] ${line}`)
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+const contains = (r: Rectangle, p: Point): boolean => p.x >= r.x && p.y >= r.y && p.x < r.x + r.width && p.y < r.y + r.height
 
 function loadKeys(): void {
-  // Dev: app/.env. Installed app: the .env in the user data folder (shown in the UI).
-  loadEnvFiles([join(process.cwd(), '.env'), join(app.getAppPath(), '.env'), userEnvFile()])
+  // Dev: app/.env. Installed app: the .env in the user data folder.
+  loadEnvFiles([join(process.cwd(), '.env'), join(app.getAppPath(), '.env'), join(app.getPath('userData'), '.env')])
 }
 
-function status(): AppStatus {
-  const ai = providerInfo()
-  return {
-    platform: process.platform,
-    provider: ai?.provider ?? null,
-    model: ai?.model ?? null,
-    region: ai?.region ?? null,
-    hasDeepgramKey: Boolean(process.env.DEEPGRAM_API_KEY),
-    screenAccess: screenAccess(),
-    hotkeys: HOTKEYS,
-    hotkeyErrors,
-    envFile: app.isPackaged ? userEnvFile() : join(process.cwd(), '.env')
-  }
-}
+// ---------- the controller ----------
 
-function toUi(channel: string, payload: unknown): void {
-  if (overlay && !overlay.isDestroyed()) overlay.webContents.send(channel, payload)
-}
-
-function makeTutor(): Tutor | null {
-  const transport = createTransport() // Claude API or Bedrock, from the env
-  return transport ? new Tutor(transport, log) : null
-}
-
-function showOverlay(): void {
-  if (!overlay) return
-  // No app.focus() here: on macOS the panel takes keyboard focus without activating the app,
-  // so a full-screen browser stays in its own Space instead of being switched away from.
-  overlay.show()
-  overlay.focus()
-}
-
-function toggleOverlay(): void {
-  if (overlay?.isVisible()) overlay.hide()
-  else showOverlay()
-}
-
-/** Hide the panel (without losing its place) while the screen is captured. */
-async function withPanelHidden<T>(fn: () => Promise<T>): Promise<T> {
-  const win = overlay
-  const visible = Boolean(win?.isVisible())
-  if (win && visible) {
-    win.setOpacity(0)
-    await sleep(150)
-  }
-  try {
-    return await fn()
-  } finally {
-    if (win && visible && !win.isDestroyed()) win.setOpacity(1)
-  }
-}
-
-async function captureScreen(): Promise<ImageInput | null> {
-  return withPanelHidden(async () => {
-    const image = await captureDisplay(activeDisplay())
-    return image ? toModelImage(image) : null
-  })
-}
-
-async function ask(kind: 'screen' | 'area'): Promise<void> {
-  if (capturing) return
-  capturing = true
-  try {
+const controller = new IslandController({
+  makeTracer: () => {
     loadKeys() // pick up a key added since launch
-    toUi(IPC.status, status())
-    if (screenAccess() === 'denied') {
-      showOverlay()
-      controller.fail('Clueless needs screen access to read your problem. Use the button above to allow it.')
-      return
-    }
-    let image: ImageInput | null = null
-    if (kind === 'area') {
-      const display = activeDisplay()
-      overlay?.setOpacity(0)
-      const rect: Rect | null = await selectArea(display)
-      if (!rect || rect.width < 8 || rect.height < 8) {
-        overlay?.setOpacity(1)
-        return
-      }
-      await sleep(200) // let the selection layer disappear before capturing
-      const full = await captureDisplay(display)
-      overlay?.setOpacity(1)
-      image = full ? toModelImage(cropToRect(full, rect, display)) : null
-    } else {
-      image = await captureScreen()
-    }
-    showOverlay()
-    if (!image) {
-      controller.fail("Couldn't capture your screen. On macOS, allow Screen Recording for Clueless and restart it.")
-      return
-    }
-    await controller.startProblem({ image })
+    const transport = createTransport()
+    return transport ? new Tracer(transport, log) : null
+  },
+  capture: captureForClaude,
+  emit: (view) => {
+    if (island && !island.isDestroyed()) island.webContents.send(ISLAND_IPC.view, view)
+    applyMode(modeFor(view))
+  },
+  schedule: (fn, ms) => {
+    const t = setTimeout(fn, ms)
+    return () => clearTimeout(t)
+  },
+  now: () => Date.now()
+})
+
+function modeFor(view: IslandView): IslandMode {
+  return view.phase === 'playing' ? 'full' : view.phase === 'idle' ? 'pill' : 'card'
+}
+
+function applyMode(mode: IslandMode): void {
+  if (!island || island.isDestroyed()) return
+  const wasFull = islandMode === 'full'
+  islandMode = mode
+  placeIsland(island, islandDisplay, mode, contentSize)
+  if (mode === 'full' && !wasFull) island.focus() // so Esc reaches the animation
+}
+
+/** A screenshot of the display the student is working on, with Clueless's own windows hidden. */
+async function captureForClaude(): Promise<ScreenImage | null> {
+  const own = [island, askButton].filter((w): w is BrowserWindow => Boolean(w && !w.isDestroyed() && w.isVisible()))
+  own.forEach((w) => w.setOpacity(0))
+  await sleep(150)
+  try {
+    const image = await captureDisplay(islandDisplay)
+    return image ? toModelImage(image) : null
+  } catch (err) {
+    log(`capture failed: ${(err as Error).message}`)
+    return null
   } finally {
-    capturing = false
+    own.forEach((w) => !w.isDestroyed() && w.setOpacity(1))
   }
 }
 
-function openScreenSettings(): void {
-  if (process.platform === 'darwin') {
-    void shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture')
+// ---------- highlight -> Ask button ----------
+
+const watcher = new SelectionWatcher({
+  isOwnWindowAt: (p) =>
+    [island, askButton].some((w) => w && !w.isDestroyed() && w.isVisible() && contains(w.getBounds(), p)),
+  paused: () => islandMode === 'full',
+  onSelection: (text, at) => {
+    pendingSnippet = text
+    showAskButton(at)
+  },
+  onOtherInput: (at) => {
+    if (!askButton?.isVisible()) return
+    if (!at || !contains(askButton.getBounds(), at)) hideAskButton()
   }
+})
+
+function showAskButton(at: Point): void {
+  if (!askButton || askButton.isDestroyed()) return
+  placeAskButton(askButton, at, screen.getDisplayNearestPoint(at))
+  askButton.showInactive()
+  armAskTimer()
+}
+
+/** The button goes away after a few seconds, unless the mouse is on it. */
+function armAskTimer(): void {
+  if (askTimer) clearTimeout(askTimer)
+  askTimer = setTimeout(() => {
+    if (askButton?.isVisible() && contains(askButton.getBounds(), screen.getCursorScreenPoint())) armAskTimer()
+    else hideAskButton()
+  }, ASK_BUTTON_MS)
+}
+
+function hideAskButton(): void {
+  if (askTimer) clearTimeout(askTimer)
+  askTimer = null
+  if (askButton && !askButton.isDestroyed()) askButton.hide()
+}
+
+function onAsk(): void {
+  const snippet = pendingSnippet
+  const at = askButton?.getBounds()
+  hideAskButton()
+  if (!snippet) return
+  if (at) islandDisplay = screen.getDisplayMatching(at)
+  void controller.ask(snippet)
+}
+
+// ---------- show / hide ----------
+
+function showIsland(): void {
+  if (!island) return
+  islandDisplay = activeDisplay()
+  applyMode(modeFor(controller.current))
+  island.showInactive() // keep the student's app (and its highlight) focused
+  try {
+    watcher.start()
+  } catch (err) {
+    log(`can't watch for highlights: ${(err as Error).message}`)
+  }
+}
+
+function hideIsland(): void {
+  watcher.stop()
+  hideAskButton()
+  controller.closeCard()
+  island?.hide()
+}
+
+function toggleIsland(): void {
+  if (island?.isVisible()) hideIsland()
+  else showIsland()
 }
 
 // ---------- wiring ----------
 
-let controller: SessionController
-let stuck: StuckDetector
-let voice: VoiceManager
 const keepAlive: unknown[] = [] // the tray icon disappears if it's garbage-collected
 
 function setup(): void {
   loadKeys()
-  if (process.platform === 'darwin') {
-    // An overlay, not a regular app: no dock icon (the menu-bar icon replaces it). Together with
-    // the panel window type this lets Clueless float over full-screen apps without macOS
-    // switching Spaces.
-    app.dock?.hide()
-  }
-  // Copy, paste, select all and undo in the text boxes come from the app menu's Edit roles.
+  // An overlay, not a regular app: no dock icon on macOS (the menu-bar icon replaces it).
+  if (process.platform === 'darwin') app.dock?.hide()
+  // Copy, paste and select all in the follow-up box come from the Edit menu's roles.
   Menu.setApplicationMenu(
-    Menu.buildFromTemplate(
-      process.platform === 'darwin' ? [{ role: 'appMenu' }, { role: 'editMenu' }] : [{ role: 'editMenu' }]
-    )
+    Menu.buildFromTemplate(process.platform === 'darwin' ? [{ role: 'appMenu' }, { role: 'editMenu' }] : [{ role: 'editMenu' }])
   )
-  const store = new MemoryStore(join(app.getPath('userData'), 'clueless-memory.json'))
 
-  stuck = new StuckDetector({
-    thumbnail: () => grayThumbnail(activeDisplay()),
-    windowTitles,
-    isCluelessFocused: () => Boolean(overlay?.isFocused()),
-    onChange: (state) => controller.setStuck(state)
+  ipcMain.handle(ISLAND_IPC.getView, () => controller.current)
+  ipcMain.on(ISLAND_IPC.setAnimate, (_e, on: unknown) => controller.setAnimate(Boolean(on)))
+  ipcMain.on(ISLAND_IPC.followUp, (_e, text: unknown) => {
+    if (typeof text === 'string') void controller.followUp(text.slice(0, 2000))
   })
-
-  controller = new SessionController({
-    makeTutor,
-    memory: store,
-    captureScreen,
-    emit: (view: SessionView | null) => toUi(IPC.session, view),
-    stuck
-  })
-
-  voice = new VoiceManager({
-    apiKey: () => {
-      loadKeys() // pick up a key added since launch
-      return process.env.DEEPGRAM_API_KEY?.trim() || undefined
-    },
-    events: {
-      transcript: (t) => toUi(IPC.voiceTranscript, t),
-      state: (e) => toUi(IPC.voiceState, e)
-    },
-    // Node's built-in WebSocket (no extra package).
-    makeSocket: (url, protocols) => new WebSocket(url, protocols) as unknown as SocketLike
+  ipcMain.on(ISLAND_IPC.closeCard, () => controller.closeCard())
+  ipcMain.on(ISLAND_IPC.finish, () => controller.finishAnimation())
+  ipcMain.on(ISLAND_IPC.hide, () => hideIsland())
+  ipcMain.on(ISLAND_IPC.hold, (_e, hold: unknown) => controller.holdCard(Boolean(hold)))
+  ipcMain.on(ISLAND_IPC.ask, () => onAsk())
+  ipcMain.on(ISLAND_IPC.resize, (_e, size: { width: number; height: number }) => {
+    if (!Number.isFinite(size?.width) || !Number.isFinite(size?.height) || size.width < 1 || size.height < 1) return
+    contentSize = { width: size.width, height: size.height }
+    if (island && islandMode !== 'full') placeIsland(island, islandDisplay, islandMode, contentSize)
   })
 
-  ipcMain.handle(IPC.getStatus, () => status())
-  ipcMain.handle(IPC.getSession, () => controller.current)
-  ipcMain.handle(IPC.getMemory, () => store.view())
-  ipcMain.handle(IPC.rateCard, (_e, arg: { id: string; rating: CardRating }) => {
-    if (typeof arg?.id === 'string' && [1, 2, 3, 4].includes(arg.rating)) store.rate(arg.id, arg.rating)
-    return store.view()
-  })
-  ipcMain.on(IPC.ask, (_e, mode: 'screen' | 'area') => void ask(mode === 'area' ? 'area' : 'screen'))
-  ipcMain.on(IPC.askText, (_e, text: string) => {
-    if (typeof text !== 'string' || !text.trim()) return
-    loadKeys()
-    toUi(IPC.status, status())
-    void controller.startProblem({ text: text.slice(0, 8000) })
-  })
-  ipcMain.on(IPC.send, (_e, arg: { text: string; as: InputKind }) => {
-    if (typeof arg?.text === 'string') void controller.send(arg.text.slice(0, 4000), arg.as)
-  })
-  ipcMain.on(IPC.action, (_e, action: UserAction) => void controller.action(action))
-  ipcMain.on(IPC.step, (_e, arg: { id: number; intent: StepIntent }) => {
-    if (typeof arg?.id === 'number' && ['stuck', 'revisit', 'claim'].includes(arg.intent)) void controller.step(arg.id, arg.intent)
-  })
-  ipcMain.on(IPC.setSubject, (_e, subject: Subject) => controller.setSubject(subject))
-  // Compact mode needs nothing here: the panel shrinks to its header and fitHeight follows it.
-  ipcMain.on(IPC.windowMode, () => {})
-  ipcMain.on(IPC.fitHeight, (_e, px: number) => {
-    if (overlay && typeof px === 'number') fitPanelHeight(overlay, px)
-  })
-  ipcMain.on(IPC.resizeWidth, (_e, arg: { width: number; anchor: 'left' | 'right' }) => {
-    if (overlay && typeof arg?.width === 'number') resizePanelWidth(overlay, arg.width, arg.anchor === 'left' ? 'left' : 'right')
-  })
-  ipcMain.on(IPC.hide, () => overlay?.hide())
-  ipcMain.on(IPC.quit, () => app.quit())
-  ipcMain.on(IPC.openScreenSettings, () => openScreenSettings())
-  ipcMain.on(IPC.areaDone, (_e, rect: Rect) => resolveAreaSelection(rect))
-  ipcMain.on(IPC.areaCancel, () => resolveAreaSelection(null))
-  ipcMain.handle(IPC.voiceMicAccess, async () => {
-    // macOS asks the student once; Windows uses its own privacy setting and Chromium handles it.
-    if (process.platform !== 'darwin') return true
-    if (systemPreferences.getMediaAccessStatus('microphone') === 'granted') return true
-    return systemPreferences.askForMediaAccess('microphone')
-  })
-  const elevenLabs = new ElevenLabs(
-    () => {
-      loadKeys() // pick up a key added since launch
-      return process.env
-    },
-    fetch,
-    log
-  )
-  ipcMain.handle(IPC.voiceTts, (_e, req: unknown) => elevenLabs.speak(req))
-  ipcMain.on(IPC.voiceStart, (_e, id: unknown) => voice.start(id))
-  ipcMain.on(IPC.voiceAudio, (_e, arg: { id?: unknown; chunk?: unknown }) => voice.audio(arg?.id, arg?.chunk))
-  ipcMain.on(IPC.voiceStop, (_e, id: unknown) => voice.stop(id))
-  ipcMain.on(IPC.voiceCancel, (_e, id: unknown) => voice.cancel(id))
-
-  overlay = createOverlay()
-  overlay.on('closed', () => {
-    voice.cancelAll()
-    overlay = null
-  })
-  // A reload (or crash) of the UI drops its recorder: close the Deepgram side too.
-  overlay.webContents.on('did-start-navigation', (_e, _url, isInPlace, isMainFrame) => {
-    if (isMainFrame && !isInPlace) voice.cancelAll()
-  })
-  overlay.webContents.on('render-process-gone', () => voice.cancelAll())
-  keepAlive.push(createTray({
-    ask: () => void ask('screen'),
-    selectArea: () => void ask('area'),
-    toggle: toggleOverlay,
-    quit: () => app.quit(),
-    hotkeys: HOTKEYS
-  }))
+  islandDisplay = activeDisplay()
+  island = createIsland()
+  island.on('closed', () => (island = null))
+  askButton = createAskButton()
+  keepAlive.push(createTray({ toggle: toggleIsland, quit: () => app.quit(), hotkey: HOTKEY }))
 
   if (SMOKE) {
-    // `CLUELESS_SMOKE=1 npm start`: load the real window hidden, check the UI rendered, quit.
-    overlay.webContents.once('did-finish-load', async () => {
+    // `CLUELESS_SMOKE=1 npm start`: load the island hidden, check the UI rendered, quit.
+    island.webContents.once('did-finish-load', async () => {
       await sleep(1500)
-      const ok = await overlay?.webContents.executeJavaScript('Boolean(document.querySelector("[data-app-ready]"))')
+      const ok = await island?.webContents.executeJavaScript('Boolean(document.querySelector("[data-app-ready]"))')
       console.log(ok ? 'SMOKE OK' : 'SMOKE FAIL: UI did not render')
       app.exit(ok ? 0 : 1)
     })
     return
   }
 
-  // Launching while a full-screen app is in front: the window is created before macOS has finished
-  // turning Clueless into a menu-bar app, so it can land on the desktop Space only. Re-join every
-  // Space (full-screen ones included) once that's settled, then show it the same way the hotkey does.
-  overlay.once('ready-to-show', () =>
-    setTimeout(() => {
-      overlay?.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
-      showOverlay()
-    }, 800)
-  )
-  for (const [name, accelerator] of Object.entries(HOTKEYS)) {
-    const ok = globalShortcut.register(accelerator, () => void ask(name === 'area' ? 'area' : 'screen'))
-    if (!ok) hotkeyErrors.push(`${accelerator} is taken by another app`)
-  }
-  const voiceOk = globalShortcut.register(VOICE_HOTKEY, () => {
-    showOverlay()
-    toUi(IPC.voiceToggle, null)
-  })
-  if (!voiceOk) hotkeyErrors.push(`${VOICE_HOTKEY} is taken by another app`)
-  log(`ready. Ask: ${HOTKEYS.ask}  Select area: ${HOTKEYS.area}  Voice: ${VOICE_HOTKEY}`)
+  island.once('ready-to-show', () => showIsland())
+  if (!globalShortcut.register(HOTKEY, toggleIsland)) log(`${HOTKEY} is taken by another app`)
+  log(`ready. Show / hide the island: ${HOTKEY}`)
 }
 
-// Smoke runs use their own data folder, so they don't collide with a running copy (or its memory file).
+// Smoke runs use their own data folder, so they don't collide with a running copy.
 if (SMOKE) app.setPath('userData', join(tmpdir(), `clueless-smoke-${process.pid}`))
 
 if (!app.requestSingleInstanceLock()) {
   app.quit()
 } else {
-  app.on('second-instance', () => showOverlay())
+  app.on('second-instance', () => showIsland())
   app.whenReady().then(setup)
-  app.on('activate', () => showOverlay())
   app.on('window-all-closed', () => app.quit())
   app.on('will-quit', () => {
     globalShortcut.unregisterAll()
-    voice?.cancelAll()
+    watcher.stop()
   })
 }

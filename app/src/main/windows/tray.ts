@@ -1,14 +1,12 @@
-// Menu-bar (macOS) / system-tray (Windows) icon. On macOS Clueless has no dock icon (that's what
-// lets it float over full-screen apps), so this is where you show it, ask, or quit.
+// Menu-bar (macOS) / system-tray (Windows) icon. Clueless runs in the background: this is where
+// you show or hide the island and quit.
 import { Menu, nativeImage, Tray } from 'electron'
 import { MAC1X, MAC2X, WIN } from './trayIcons'
 
 export interface TrayActions {
-  ask(): void
-  selectArea(): void
   toggle(): void
   quit(): void
-  hotkeys: { ask: string; area: string }
+  hotkey: string
 }
 
 export function createTray(actions: TrayActions): Tray {
@@ -25,14 +23,12 @@ export function createTray(actions: TrayActions): Tray {
   tray.setToolTip('Clueless')
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: 'Read my screen', accelerator: actions.hotkeys.ask, click: actions.ask },
-      { label: 'Select just the problem', accelerator: actions.hotkeys.area, click: actions.selectArea },
-      { label: 'Show / hide Clueless', click: actions.toggle },
+      { label: 'Show / hide Clueless', accelerator: actions.hotkey, click: actions.toggle },
       { type: 'separator' },
       { label: 'Quit Clueless', role: 'quit', click: actions.quit }
     ])
   )
-  // Windows: a left click toggles the panel (the menu is on right click).
+  // Windows: a left click toggles the island (the menu is on right click).
   if (process.platform === 'win32') tray.on('click', actions.toggle)
   return tray
 }

@@ -2,6 +2,7 @@
 // Type-only imports from ./schema, so the UI bundle doesn't pull in zod.
 import type { z } from 'zod'
 import type * as S from './schema'
+import type { CodeTrace } from './trace'
 
 export type Subject = z.infer<typeof S.Subject>
 export type GapType = z.infer<typeof S.GapType>
@@ -276,4 +277,52 @@ export interface CluelessApi {
   onVoiceState(cb: (e: VoiceStateEvent) => void): () => void
   onVoiceToggle(cb: () => void): () => void
   tts(req: TtsRequest): Promise<TtsResult>
+}
+
+// ---------- the island (the floating pill: highlight -> Ask -> text, then the animation) ----------
+
+/** idle = just the pill · thinking / answer / reading = the pill with a text card under it ·
+ *  playing = the full-screen animation. "reading" is the 4 s before an animation starts. */
+export type IslandPhase = 'idle' | 'thinking' | 'answer' | 'reading' | 'playing'
+
+export interface IslandMessage {
+  role: 'student' | 'clueless'
+  text: string
+}
+
+export interface IslandView {
+  animate: boolean // the Animate On/Off toggle
+  phase: IslandPhase
+  snippet: string | null // the highlighted text being discussed
+  messages: IslandMessage[]
+  trace: CodeTrace | null // set while reading / playing
+  busySince: number | null // when the current Claude call started
+  error: string | null
+}
+
+export const ISLAND_IPC = {
+  view: 'island:view', // main -> UI: IslandView
+  getView: 'island:get-view', // invoke
+  setAnimate: 'island:animate', // boolean
+  followUp: 'island:follow-up', // string
+  closeCard: 'island:close-card',
+  finish: 'island:finish', // the animation was clicked away
+  hide: 'island:hide',
+  resize: 'island:resize', // { width, height } of the pill / card content
+  hold: 'island:hold', // boolean: the mouse is over the card (don't auto-close)
+  ask: 'island:ask' // the Ask button next to the cursor was clicked
+} as const
+
+/** The API the preload script exposes as `window.island` (the island and the Ask button windows). */
+export interface IslandApi {
+  getView(): Promise<IslandView>
+  onView(cb: (view: IslandView) => void): () => void
+  setAnimate(on: boolean): void
+  followUp(text: string): void
+  closeCard(): void
+  finishAnimation(): void
+  hide(): void
+  resize(size: { width: number; height: number }): void
+  holdCard(hold: boolean): void
+  ask(): void
 }
