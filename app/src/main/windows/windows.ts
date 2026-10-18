@@ -2,6 +2,7 @@
 import { app, BrowserWindow, screen, shell, type Display } from 'electron'
 import { join } from 'node:path'
 import type { Rect } from '../../shared/contracts'
+import { islandBounds, type IslandAnchor } from '../../shared/islandPlacement'
 
 /** The window wraps the panel (plus an 8px margin for its shadow) and follows its height. */
 export const PANEL_WIDTH = 416
@@ -147,7 +148,7 @@ export function createIsland(): BrowserWindow {
     frame: false,
     transparent: true,
     resizable: false,
-    movable: false,
+    movable: true,
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
@@ -168,15 +169,12 @@ export function createIsland(): BrowserWindow {
 }
 
 /** Pill and card: `size` is the content, centered at the top of the display. Full: the whole display. */
-export function placeIsland(win: BrowserWindow, display: Display, mode: IslandMode, size: { width: number; height: number }): void {
+export function placeIsland(win: BrowserWindow, display: Display, mode: IslandMode, size: { width: number; height: number }, anchor?: IslandAnchor): void {
   if (mode === 'full') {
     win.setBounds(display.bounds)
     return
   }
-  const work = display.workArea
-  const width = Math.min(Math.ceil(size.width), work.width)
-  const height = Math.min(Math.ceil(size.height), work.height - 16)
-  win.setBounds({ x: Math.round(work.x + (work.width - width) / 2), y: work.y + 6, width, height })
+  win.setBounds(islandBounds(display.workArea, size, anchor))
 }
 
 export const ASK_BUTTON_SIZE = { width: 104, height: 48 }

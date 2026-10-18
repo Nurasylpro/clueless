@@ -4,7 +4,7 @@
 // Animate on + code: the whole screen becomes the animation right away; its recap waits in the card.
 // Otherwise the answer opens in the card. Voice on: answers, and every animation step, are read aloud.
 import { AnimatePresence, motion } from 'motion/react'
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
 import type { IslandView } from '../../../shared/contracts'
 import { toSpeech } from '../../../shared/speechText'
 import { ChevronDownIcon, CloseIcon, Logo, MicIcon, PlayIcon, SendIcon, SpeakerIcon } from '../components/icons'
@@ -61,7 +61,7 @@ function remember(key: 'animate' | 'voice', on: boolean): void {
 }
 
 /** The pill, plus the card when it's open. Reports its size so the window fits it exactly. */
-export function IslandShell({ view }: { view: IslandView }) {
+export function IslandShell({ view, onMoveStart }: { view: IslandView; onMoveStart?: (event: PointerEvent<HTMLButtonElement>) => void }) {
   const root = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
     const el = root.current
@@ -105,7 +105,7 @@ export function IslandShell({ view }: { view: IslandView }) {
 
   return (
     <div ref={root} className="inline-flex flex-col items-center gap-2 p-2.5 text-zinc-100" data-app-ready>
-      <Pill view={view} mic={mic} listening={listening} onMic={toggleMic} />
+      <Pill view={view} mic={mic} listening={listening} onMic={toggleMic} onMoveStart={onMoveStart} />
       <AnimatePresence initial={false}>
         {view.expanded && (
           <motion.div
@@ -127,17 +127,26 @@ export function IslandShell({ view }: { view: IslandView }) {
 const DARK = 'border border-white/10 bg-zinc-900/90 shadow-[0_12px_40px_rgba(0,0,0,0.45)] backdrop-blur'
 const ROUND = 'flex h-9 items-center justify-center rounded-full transition-colors'
 
-function Pill({ view, mic, listening, onMic }: { view: IslandView; mic: VoiceInput; listening: boolean; onMic: () => void }) {
+function Pill({ view, mic, listening, onMic, onMoveStart }: { view: IslandView; mic: VoiceInput; listening: boolean; onMic: () => void; onMoveStart?: (event: PointerEvent<HTMLButtonElement>) => void }) {
   const thinking = view.phase === 'thinking'
   return (
     <div className={cx('flex h-12 items-center gap-1.5 rounded-full pl-1.5 pr-1.5', DARK)}>
-      <div
+      <button
+        type="button"
+        disabled={thinking}
+        onClick={() => { speech.stop(); mic.cancel(); islandApi.startGuidance() }}
+        aria-label="Scan screen and help me get unstuck"
+        aria-pressed={view.guiding}
         className={cx('flex h-9 w-9 items-center justify-center rounded-full bg-amber-400 text-zinc-950', thinking && 'animate-pulse')}
-        title={thinking ? 'Thinking…' : 'Clueless'}
+        title={thinking ? 'Thinking…' : 'Scan screen and help me get unstuck'}
       >
         <Logo size={19} />
-      </div>
-      {thinking && !view.expanded && <ThinkingChip since={view.busySince} animate={view.animate} />}
+      </button>
+      <button type="button" aria-label="Move island" title="Drag to move the island" onPointerDown={onMoveStart}
+        className={cx('flex h-9 w-4 shrink-0 touch-none cursor-grab items-center justify-center text-zinc-500 active:cursor-grabbing', !isIslandMock && 'drag')}>
+        ⠿
+      </button>
+      {thinking && !view.expanded && <ThinkingChip since={view.busySince} animate={view.animate && !view.guiding} />}
       <MicButton mic={mic} listening={listening} onMic={onMic} />
       <Switch
         label="Animate"
@@ -267,6 +276,7 @@ function Card({ view, mic, listening, reading }: { view: IslandView; mic: VoiceI
   return (
     <div
       className={cx('w-[560px] rounded-2xl p-4', DARK)}
+      style={{ maxWidth: isIslandMock ? 'calc(100vw - 20px)' : `${Math.max(240, window.screen.availWidth - 24)}px` }}
       onMouseEnter={() => islandApi.holdCard(true)}
       onMouseLeave={() => islandApi.holdCard(reading.speaking)}
     >
@@ -275,7 +285,7 @@ function Card({ view, mic, listening, reading }: { view: IslandView; mic: VoiceI
           <SnippetPreview text={view.snippet} />
         ) : (
           <div className="min-w-0 flex-1 truncate text-[12px] text-zinc-500">
-            {view.messages.length ? 'About your screen' : 'Highlight code and click Ask, or ask here about your screen'}
+            {view.guiding ? 'Screen coach · one question at a time' : view.messages.length ? 'About your screen' : 'Highlight code and click Ask, or ask here about your screen'}
           </div>
         )}
         {reading.speaking && (
@@ -327,7 +337,7 @@ function Card({ view, mic, listening, reading }: { view: IslandView; mic: VoiceI
         {!listening && mic.state === 'error' && mic.notice && (
           <div className="rounded-lg bg-white/[0.05] px-3 py-2 text-[13px] text-zinc-300">{mic.notice}</div>
         )}
-        {thinking && <Thinking since={view.busySince} animate={view.animate} />}
+        {thinking && <Thinking since={view.busySince} animate={view.animate && !view.guiding} />}
       </div>
 
       <Composer disabled={thinking || listening} />

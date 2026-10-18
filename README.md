@@ -6,13 +6,18 @@ Clueless runs in the background and shows up as a small **island** at the top of
 `Cmd/Ctrl + Shift + 2` to show it, **highlight some code** in any app (LeetCode, your editor), and click the
 **Ask** button that appears next to the cursor.
 
-- **Animate on:** a short text, then 4 seconds later the screen dims and your code runs step by step.
-  Every variable is a simple figure on the left, your code is on the right, a bright box follows the part
-  that runs, and whatever changes lights up. Click anywhere when it's done.
+- **Animate on:** a centered workspace opens with variables on the left, code on the right, and a
+  caption for each step. Scroll inside either pane, zoom the variables, and drag variable names to
+  arrange them. Back, Pause/Resume, and speed controls stay inside the workspace.
 - **Animate off:** a short explanation in the island, with a box for follow-up questions.
+- **Voice on:** Jessica reads replies and animation captions through ElevenLabs. Animation requests
+  are queued and retried; a service failure shows a notice and keeps captions rather than changing voices.
+- **Logo:** scan the current screen and start a coaching conversation, one question at a time.
+- **Move:** drag the grip beside the logo. The island keeps its position when opening or closing its card.
 
-It explains your code; it doesn't write your solution. The original tutor (questions, hints, answer
-checks, recap, flashcards, voice) is still in the repo, but the island doesn't show it yet.
+It explains your code; it doesn't write your solution. Python runs in Pyodide for accurate traces;
+Claude supplies the explanations. The original tutor's answer checker, memory, and flashcards are
+still in the repo; screen coaching now lives in the island.
 
 ## What the tutor does (not shown in the island yet)
 

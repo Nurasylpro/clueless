@@ -1,5 +1,5 @@
 // Reads the animation's lines aloud, in step with it: ElevenLabs (through the main process) when a
-// key is set, the computer's own voice otherwise. While one line plays, the next ones are already
+// available; only the browser preview uses the computer's voice. While one line plays, the next ones are already
 // downloading, so the voice moves from step to step without a pause. Speed changes how fast it
 // talks without changing its pitch. If no voice works at all, it waits about as long as the line
 // takes to read, so the animation never gets stuck.
@@ -23,10 +23,10 @@ export function createNarrator(
   line: (index: number) => string, // -1 = the intro
   count: number, // steps; lines go from -1 to count - 1
   tts: Tts | null,
-  rate = 1
+  rate = 1,
+  notice: (message: string | null) => void = () => {}
 ): Narrator {
   const audio: Map<number, Promise<TtsResult>> = new Map()
-  let cloud = Boolean(tts) // off after the first "no key" / failure: the rest uses the computer's voice
   let generation = 0
   let player: HTMLAudioElement | null = null
   let url: string | null = null
@@ -35,7 +35,7 @@ export function createNarrator(
   const text = (i: number): string => (i >= -1 && i < count ? toSpeech(line(i)) : '')
 
   const fetchLine = (i: number): Promise<TtsResult> | null => {
-    if (!cloud || !tts || i < -1 || i >= count || !text(i)) return null
+    if (!tts || i < -1 || i >= count || !text(i)) return null
     let p = audio.get(i)
     if (!p) {
       p = tts({ text: text(i), previousText: text(i - 1) || undefined, nextText: text(i + 1) || undefined }).catch(
@@ -44,6 +44,13 @@ export function createNarrator(
       audio.set(i, p)
     }
     return p
+  }
+
+  // Production never substitutes another speaker for Jessica. A failed line stays readable,
+  // and the next line (or a resumed line) can try the same service again.
+  const silent = (words: string, gen: number, done: () => void, why: string): void => {
+    notice(`Voice unavailable: ${why} Continuing with captions.`)
+    fallbackTimer = setTimeout(() => gen === generation && done(), (900 + words.split(/\s+/).length * 380) / rate)
   }
 
   const prefetch = (from: number): void => {
@@ -115,20 +122,28 @@ export function createNarrator(
     void pending.then(async (res) => {
       if (gen !== generation) return
       if (!res.ok) {
-        cloud = false // no key, or the service failed: the computer's voice from here on
-        return builtIn(words, gen, done)
+        audio.delete(index)
+        return silent(words, gen, done, res.message)
       }
+      notice(null)
       url = URL.createObjectURL(new Blob([res.audio], { type: res.mime }))
       const a = (player ??= new Audio())
       a.preservesPitch = true
       a.src = url
       a.playbackRate = rate
       a.onended = () => gen === generation && done()
-      a.onerror = () => gen === generation && builtIn(words, gen, done)
+      let failed = false
+      const playbackFailed = (): void => {
+        if (failed || gen !== generation) return
+        failed = true
+        clear()
+        silent(words, gen, done, 'The audio could not play.')
+      }
+      a.onerror = playbackFailed
       try {
         await a.play()
       } catch {
-        if (gen === generation && a.paused) builtIn(words, gen, done)
+        if (gen === generation && a.paused) playbackFailed()
       }
     })
     return stop
@@ -148,7 +163,8 @@ export function createNarrator(
     warm: () => prefetch(-1),
     dispose: () => {
       stop()
-      audio.clear()
+      // Keep in-flight promises if React restarts this same effect in development. A genuinely
+      // unmounted narrator is garbage-collected with its cache; no duplicate paid downloads.
     }
   }
 }

@@ -18,6 +18,36 @@ const voices = (names: string[]) =>
 const mp3 = () => new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'audio/mpeg' } })
 
 describe('ElevenLabs', () => {
+  it('serializes prefetched narration so it never exceeds one active conversion', async () => {
+    let active = 0
+    let maximum = 0
+    const ids: string[] = []
+    const http = (async (url: string) => {
+      active++
+      maximum = Math.max(maximum, active)
+      ids.push(url)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      active--
+      return mp3()
+    }) as unknown as typeof fetch
+    const el = new ElevenLabs(() => ({ ELEVENLABS_API_KEY: 'k', ELEVENLABS_VOICE: 'abcdefghij0123456789' }), http)
+    const results = await Promise.all(['Intro', 'First', 'Next', 'Last'].map((text) => el.speak({ text })))
+    expect(results.every((result) => result.ok)).toBe(true)
+    expect(maximum).toBe(1)
+    expect(ids.every((url) => url.includes('/abcdefghij0123456789?'))).toBe(true)
+  })
+
+  it('retries a rate limit using the same voice', async () => {
+    let conversions = 0
+    const { http, calls } = fakeFetch(({ url }) => {
+      if (url.includes('/v2/voices')) return voices(['Jessica - Warm'])
+      return ++conversions === 1 ? new Response('busy', { status: 429, headers: { 'retry-after': '0.001' } }) : mp3()
+    })
+    const el = new ElevenLabs(() => ({ ELEVENLABS_API_KEY: 'k', ELEVENLABS_VOICE: 'Jessica' }), http)
+    expect(await el.speak({ text: 'Hi' })).toMatchObject({ ok: true })
+    expect(calls.filter((call) => call.url.includes('/text-to-speech/')).map((call) => call.url)).toEqual([calls[1].url, calls[1].url])
+  })
+
   it('no key: tells the UI to use the built-in voice, without calling the API', async () => {
     const { http, calls } = fakeFetch(() => mp3())
     const el = new ElevenLabs(() => ({}), http)

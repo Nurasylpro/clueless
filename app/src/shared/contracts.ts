@@ -291,6 +291,7 @@ export interface IslandMessage {
 }
 
 export interface IslandView {
+  guiding: boolean // screen coaching: one question at a time, kept in the card
   animate: boolean // Animate On/Off: code answers play step by step on the full screen
   voice: boolean // Voice On/Off: answers and every animation step are read aloud
   expanded: boolean // the card under the pill (answers, the recap, the text box) is open
@@ -311,6 +312,7 @@ export const ISLAND_IPC = {
   setVoice: 'island:voice', // boolean
   setExpanded: 'island:expanded', // boolean
   askText: 'island:ask-text', // string: typed or spoken in the card
+  guide: 'island:guide', // logo: fresh screenshot and a guided conversation
   replay: 'island:replay', // play the latest animation again
   finish: 'island:finish', // the animation was clicked away
   resize: 'island:resize', // { width, height } of the pill / card content
@@ -328,6 +330,7 @@ export interface IslandApi {
   setVoice(on: boolean): void
   setExpanded(open: boolean): void
   askText(text: string): void
+  startGuidance(): void
   replay(): void
   finishAnimation(): void
   resize(size: { width: number; height: number }): void

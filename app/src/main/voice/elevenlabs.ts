@@ -13,8 +13,9 @@ export const MAX_TTS_CHARS = 2500
 /** Warm, natural "teacher" voices, best first: ElevenLabs' new voice names, then the built-in
  *  ones every account (including free) can use until they're retired at the end of 2026. */
 export const PREFERRED_VOICES = [
+  'Jessica',
   'Talia', 'Caleb', 'Maisie', 'Eddie', 'Jade', 'Wyatt', 'Lawrence',
-  'Jessica', 'Lily', 'Sarah', 'Matilda', 'Alice', 'Chris', 'Eric', 'Bella'
+  'Lily', 'Sarah', 'Matilda', 'Alice', 'Chris', 'Eric', 'Bella'
 ]
 
 // Natural delivery: a little variation (lower stability) keeps it from sounding read out.
@@ -26,6 +27,7 @@ type Fetch = typeof fetch
 export class ElevenLabs {
   private voiceCache = new Map<string, Promise<string>>()
   private modelOk = new Map<string, boolean>()
+  private queue: Promise<void> = Promise.resolve()
 
   constructor(
     private readonly env: () => Env,
@@ -34,6 +36,20 @@ export class ElevenLabs {
   ) {}
 
   async speak(req: unknown): Promise<TtsResult> {
+    // Animation prefetch used to send four requests together. Accounts with a low concurrency
+    // limit could reject the first line and make the entire trace switch to a different voice.
+    const previous = this.queue
+    let release!: () => void
+    this.queue = new Promise<void>((resolve) => { release = resolve })
+    await previous
+    try {
+      return await this.synthesize(req)
+    } finally {
+      release()
+    }
+  }
+
+  private async synthesize(req: unknown): Promise<TtsResult> {
     const input = validate(req)
     if (!input) return { ok: false, reason: 'error', message: 'Nothing to say.' }
     const env = this.env()
@@ -60,6 +76,7 @@ export class ElevenLabs {
       if (res.status === 402) {
         const detail = await res.text().catch(() => '')
         if (!/paid_plan_required|library voices/i.test(detail)) return fail(res.status, detail)
+        if (/^jessica/i.test(env.ELEVENLABS_VOICE?.trim() || '')) return fail(res.status, detail)
         const sub = await this.voice(key, FREE_VOICE)
         this.log(`elevenlabs: "${env.ELEVENLABS_VOICE}" needs a paid ElevenLabs plan, using a free voice instead`)
         this.voiceCache.set(`${key.slice(-6)}:${env.ELEVENLABS_VOICE?.trim() || ''}`, Promise.resolve(sub))
@@ -76,21 +93,28 @@ export class ElevenLabs {
     }
   }
 
-  private convert(key: string, voiceId: string, model: string, input: TtsRequest): Promise<Response> {
+  private async convert(key: string, voiceId: string, model: string, input: TtsRequest): Promise<Response> {
     const useModel = this.modelOk.get(model) === false ? FALLBACK_MODEL : model
-    return this.http(`${API}/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`, {
-      method: 'POST',
-      headers: { 'xi-api-key': key, 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
-      body: JSON.stringify({
-        text: input.text,
-        model_id: useModel,
-        voice_settings: VOICE_SETTINGS,
-        // Neighbouring sentences keep the intonation flowing across pieces of one reply.
-        ...(input.previousText ? { previous_text: input.previousText } : {}),
-        ...(input.nextText ? { next_text: input.nextText } : {})
-      }),
-      signal: AbortSignal.timeout(TIMEOUT_MS)
-    })
+    for (let attempt = 0; ; attempt++) {
+      const response = await this.http(`${API}/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`, {
+        method: 'POST',
+        headers: { 'xi-api-key': key, 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
+        body: JSON.stringify({
+          text: input.text,
+          model_id: useModel,
+          voice_settings: VOICE_SETTINGS,
+          // Neighbouring sentences keep the intonation flowing across pieces of one reply.
+          ...(input.previousText ? { previous_text: input.previousText } : {}),
+          ...(input.nextText ? { next_text: input.nextText } : {})
+        }),
+        signal: AbortSignal.timeout(TIMEOUT_MS)
+      })
+      if (response.status !== 429 || attempt >= 2) return response
+      const seconds = Number(response.headers.get('retry-after'))
+      await response.body?.cancel()
+      const delay = seconds > 0 ? Math.min(3000, seconds * 1000) : 750 * (attempt + 1)
+      await new Promise((resolve) => setTimeout(resolve, delay))
+    }
   }
 
   /** ELEVENLABS_VOICE can be a voice ID or a name ("Talia"); empty picks a warm default. */

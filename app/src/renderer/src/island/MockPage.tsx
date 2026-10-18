@@ -1,7 +1,8 @@
 // Browser mock mode (`npm run ui`): a fake LeetCode page with the island on top. Highlight the code
 // and click Ask, or open the island and type, or click the mic (it pretends you spoke).
 // Ctrl+Shift+2 hides / shows the island, Ctrl+Shift+1 starts the mic, like the real app.
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { motion, useDragControls, useMotionValue } from 'motion/react'
 import { setMockPageCode, type IslandMock } from './mock'
 import { AskButton, IslandShell, useIslandView } from './IslandScreen'
 import { DEMO_EXAMPLES } from './fixtures'
@@ -9,11 +10,30 @@ import { TraceOverlay } from './TraceOverlay'
 
 export function MockPage({ mock }: { mock: IslandMock }) {
   const view = useIslandView()
+  const desktop = useRef<HTMLDivElement>(null)
+  const floating = useRef<HTMLDivElement>(null)
+  const drag = useDragControls()
+  const x = useMotionValue(0)
+  const y = useMotionValue(0)
   const [hidden, setHidden] = useState(false)
   const hiddenRef = useRef(false)
   const [ask, setAsk] = useState<{ x: number; y: number } | null>(null)
   const [exampleId, setExampleId] = useState<string>('correct')
   const example = DEMO_EXAMPLES.find((item) => item.id === exampleId) ?? DEMO_EXAMPLES[0]
+  useLayoutEffect(() => {
+    const element = floating.current
+    if (!element) return
+    const clamp = (): void => {
+      const rect = element.getBoundingClientRect()
+      x.set(x.get() + (rect.left < 6 ? 6 - rect.left : Math.min(0, innerWidth - 6 - rect.right)))
+      y.set(y.get() + (rect.top < 6 ? 6 - rect.top : Math.min(0, innerHeight - 6 - rect.bottom)))
+    }
+    clamp()
+    const observer = new ResizeObserver(clamp)
+    observer.observe(element)
+    window.addEventListener('resize', clamp)
+    return () => { observer.disconnect(); window.removeEventListener('resize', clamp) }
+  }, [view?.phase, view?.expanded, hidden, x, y])
   // Questions with nothing highlighted are about the code on this page.
   useEffect(() => setMockPageCode(example.reply.trace.code), [example])
 
@@ -69,7 +89,7 @@ export function MockPage({ mock }: { mock: IslandMock }) {
 
   const playing = view?.phase === 'playing' && view.trace
   return (
-    <div className="h-full overflow-hidden">
+    <div ref={desktop} className="h-full overflow-hidden">
       <FakeLeetCode code={example.reply.trace.code} exampleId={exampleId} onExampleChange={(id) => {
         setExampleId(id)
         setAsk(null)
@@ -77,9 +97,10 @@ export function MockPage({ mock }: { mock: IslandMock }) {
         mock.setExpanded(false)
       }} />
       {!hidden && view && !playing && (
-        <div data-island className="fixed left-1/2 top-1.5 z-40 -translate-x-1/2">
-          <IslandShell view={view} />
-        </div>
+        <motion.div ref={floating} data-island className="fixed left-1/2 top-1.5 z-40 -translate-x-1/2" style={{ x, y }}
+          drag dragControls={drag} dragListener={false} dragConstraints={desktop} dragElastic={0} dragMomentum={false}>
+          <IslandShell view={view} onMoveStart={(event) => drag.start(event)} />
+        </motion.div>
       )}
       {hidden && (
         <div className="fixed left-1/2 top-3 z-40 -translate-x-1/2 rounded-full bg-black/60 px-3 py-1 text-xs text-zinc-400">

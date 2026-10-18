@@ -1,7 +1,8 @@
 // The simplest figures for a program's variables: a box for a value, a row of boxes for an array,
 // a grid, a bag for a set, key → value rows for a map. What the current step changed lights up
 // (white glow, new values pop in amber); what it only reads gets a thin outline; the rest dims.
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
+import { AnimatePresence, motion, useDragControls, useReducedMotion } from 'motion/react'
+import type { RefObject } from 'react'
 import type { EntityValue, TraceEntity } from '../../../shared/trace'
 import { cx } from '../components/ui'
 import type { Change } from './traceState'
@@ -25,7 +26,8 @@ export function Figure({
   state,
   pointers,
   emphasis,
-  celebrate = false
+  celebrate = false,
+  dragBounds
 }: {
   entity: TraceEntity
   value: EntityValue
@@ -34,11 +36,20 @@ export function Figure({
   pointers: { name: string; index: number }[]
   emphasis?: number
   celebrate?: boolean
+  dragBounds?: RefObject<HTMLDivElement | null>
 }) {
   const reducedMotion = useReducedMotion()
+  const drag = useDragControls()
   return (
     <motion.div
       layout
+      drag={Boolean(dragBounds)}
+      dragControls={drag}
+      dragListener={false}
+      dragConstraints={dragBounds}
+      dragElastic={0}
+      dragMomentum={false}
+      whileDrag={{ zIndex: 10 }}
       initial={{ opacity: 0, scale: 0.85 }}
       animate={{ opacity: state === 'idle' ? 0.38 : 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.85 }}
@@ -60,7 +71,10 @@ export function Figure({
           initial={{ opacity: 0.8, scale: 1 }} animate={{ opacity: 0, scale: 1.07 }}
           transition={{ duration: 0.9, ease: 'easeOut' }} />
       )}
-      <div className="mb-2 font-mono text-[14px] text-zinc-400">{entity.name}</div>
+      <button type="button" className="mb-2 flex w-full touch-none cursor-grab items-center gap-3 text-left font-mono text-[14px] text-zinc-400 active:cursor-grabbing"
+        onPointerDown={(event) => dragBounds && drag.start(event)} aria-label={`Move ${entity.name}`} title="Drag to arrange this variable">
+        {entity.name}<span className="ml-auto text-zinc-600" aria-hidden="true">⠿</span>
+      </button>
       {entity.kind === 'value' && <ValueBox value={value.scalar} changed={Boolean(change?.added || change?.scalar)} />}
       {entity.kind === 'array' && <ArrayRow items={value.items} changed={change} pointers={pointers} />}
       {entity.kind === 'grid' && <Grid rows={value.rows} changed={change} />}

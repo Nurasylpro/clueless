@@ -10,6 +10,7 @@ import { join, sep } from 'node:path'
 import { IPC, ISLAND_IPC, type IslandView } from '../shared/contracts'
 import { IslandController, type ScreenImage } from '../shared/islandController'
 import { codeNames } from '../shared/trace'
+import { islandBounds, type IslandAnchor } from '../shared/islandPlacement'
 import { activeDisplay, captureDisplay, toModelImage } from './capture/capture'
 import { loadEnvFiles } from './env'
 import { SelectionWatcher, type Point } from './island/selection'
@@ -34,6 +35,8 @@ let contentSize = { width: 320, height: 64 } // what the island's UI measured fo
 let pendingSnippet: string | null = null
 let askTimer: NodeJS.Timeout | null = null
 let runner: PythonRunner | null = null
+const islandAnchors = new Map<number, IslandAnchor>()
+let placedBounds: Rectangle | null = null
 
 const log = (line: string): void => console.log(`[clueless] ${line}`)
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
@@ -82,7 +85,8 @@ function applyMode(mode: IslandMode): void {
   if (!island || island.isDestroyed()) return
   const wasFull = islandMode === 'full'
   islandMode = mode
-  placeIsland(island, islandDisplay, mode, contentSize)
+  placedBounds = mode === 'full' ? islandDisplay.bounds : islandBounds(islandDisplay.workArea, contentSize, islandAnchors.get(islandDisplay.id))
+  placeIsland(island, islandDisplay, mode, contentSize, islandAnchors.get(islandDisplay.id))
   if (mode === 'full' && !wasFull) island.focus() // so Space, ← and Esc reach the animation
 }
 
@@ -231,6 +235,10 @@ function setup(): void {
   ipcMain.on(ISLAND_IPC.askText, (_e, text: unknown) => {
     if (typeof text === 'string') void controller.askText(text.slice(0, 2000))
   })
+  ipcMain.on(ISLAND_IPC.guide, () => {
+    hideAskButton()
+    void controller.startGuidance()
+  })
   ipcMain.on(ISLAND_IPC.replay, () => controller.replay())
   ipcMain.on(ISLAND_IPC.finish, () => controller.finishAnimation())
   ipcMain.on(ISLAND_IPC.hold, (_e, hold: unknown) => controller.holdCard(Boolean(hold)))
@@ -238,7 +246,7 @@ function setup(): void {
   ipcMain.on(ISLAND_IPC.resize, (_e, size: { width: number; height: number }) => {
     if (!Number.isFinite(size?.width) || !Number.isFinite(size?.height) || size.width < 1 || size.height < 1) return
     contentSize = { width: size.width, height: size.height }
-    if (island && islandMode !== 'full') placeIsland(island, islandDisplay, islandMode, contentSize)
+    if (island && islandMode !== 'full') applyMode(islandMode)
   })
 
   ipcMain.handle(IPC.voiceMicAccess, async () => {
@@ -255,6 +263,19 @@ function setup(): void {
 
   islandDisplay = activeDisplay()
   island = createIsland()
+  // Native dragging only changes the remembered anchor; automatic resizes must not recenter it.
+  island.on('moved', () => {
+    if (!island || islandMode === 'full') return
+    const bounds = island.getBounds()
+    if (placedBounds && bounds.x === placedBounds.x && bounds.y === placedBounds.y) return
+    islandDisplay = screen.getDisplayMatching(bounds)
+    islandAnchors.set(islandDisplay.id, { x: bounds.x + bounds.width / 2, y: bounds.y })
+    applyMode(islandMode) // keep the grip and card inside this display's work area
+  })
+  screen.on('display-metrics-changed', () => {
+    islandDisplay = screen.getDisplayNearestPoint({ x: islandDisplay.workArea.x, y: islandDisplay.workArea.y })
+    applyMode(islandMode)
+  })
   island.on('closed', () => {
     voice.cancelAll()
     island = null

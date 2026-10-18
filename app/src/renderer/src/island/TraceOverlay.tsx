@@ -12,6 +12,7 @@ import { Markdown } from '../components/Markdown'
 import { cx } from '../components/ui'
 import { Figure, type FigureState } from './Figures'
 import { createNarrator } from './narrator'
+import { isIslandMock } from './api'
 import { changesAt, loopPass, pointersAt, valuesAt } from './traceState'
 import { finishMessage, momentAt } from './traceExpression'
 import { lineAt, SPEEDS, TracePlayback, type Speed } from './tracePlayback'
@@ -20,8 +21,12 @@ const BOX_SPRING = { type: 'spring', stiffness: 120, damping: 22 } as const
 
 export function TraceOverlay({ trace, voice, onClose }: { trace: CodeTrace; voice: boolean; onClose: () => void }) {
   const [speed, setSpeed] = useState<Speed>(loadSpeed)
+  const [zoom, setZoom] = useState(1)
+  const [layoutVersion, setLayoutVersion] = useState(0)
+  const [voiceNotice, setVoiceNotice] = useState<string | null>(null)
+  const figureViewport = useRef<HTMLDivElement>(null)
   const narrator = useMemo(
-    () => (voice ? createNarrator((i) => lineAt(trace, i), trace.steps.length, (req) => api.tts(req), SPEEDS[loadSpeed()]) : null),
+    () => (voice ? createNarrator((i) => lineAt(trace, i), trace.steps.length, isIslandMock ? null : (req) => api.tts(req), SPEEDS[loadSpeed()], setVoiceNotice) : null),
     [trace, voice]
   )
   const player = useMemo(() => new TracePlayback(trace, SPEEDS[loadSpeed()], narrator), [trace, narrator])
@@ -78,19 +83,35 @@ export function TraceOverlay({ trace, voice, onClose }: { trace: CodeTrace; voic
 
   return (
     <motion.div
-      className={cx('fixed inset-0 z-50 flex select-none flex-col items-center bg-black/85', done && 'cursor-pointer')}
+      className="fixed inset-0 z-50 flex select-none items-center justify-center overflow-hidden bg-black/85"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.5 }}
-      onClick={() => done && onClose()}
+      onClick={(event) => { if (done && event.target === event.currentTarget) onClose() }}
       data-app-ready
     >
-      {/* the line on top: what is happening now (the same words the voice says) */}
+      <section aria-label="Animation workspace" className="flex h-[78dvh] max-h-[850px] w-[94vw] max-w-[1540px] -translate-y-[2vh] flex-col overflow-hidden rounded-3xl border border-white/15 bg-zinc-950/80 shadow-2xl">
+      <div className="flex shrink-0 items-center justify-between border-b border-white/10 px-4 py-2 text-xs text-zinc-400">
+        <span>Code walkthrough</span>
+        <button type="button" onClick={onClose} className="rounded-lg px-3 py-1.5 text-zinc-300 hover:bg-white/10" aria-label="Close animation">Close · Esc</button>
+      </div>
       <Caption trace={trace} index={index} done={done} moment={Boolean(moment)} finish={finish} reducedMotion={Boolean(reducedMotion)} />
-      <div className="grid min-h-0 w-full max-w-[1600px] flex-1 grid-cols-2 items-center gap-12 px-[5vw] pb-36 pt-4">
+      {voiceNotice && <div role="status" className="shrink-0 px-5 pt-2 text-center text-xs text-amber-200">{voiceNotice}</div>}
+      <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] gap-3 px-4 py-3">
         {/* the variables */}
-        <div className="flex flex-wrap content-center items-start justify-center gap-6">
-          <AnimatePresence>
+        <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border border-white/10">
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-white/10 px-3 py-2 text-xs text-zinc-400">
+            <span>Variables · drag names to move</span>
+            <div className="flex items-center gap-1">
+              <button type="button" aria-label="Zoom out" onClick={() => setZoom((z) => Math.max(0.5, z - 0.1))} className="rounded px-2 py-1 hover:bg-white/10">−</button>
+              <span className="w-10 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
+              <button type="button" aria-label="Zoom in" onClick={() => setZoom((z) => Math.min(1.5, z + 0.1))} className="rounded px-2 py-1 hover:bg-white/10">+</button>
+              <button type="button" onClick={() => { setZoom(1); setLayoutVersion((v) => v + 1); figureViewport.current?.scrollTo({ top: 0, left: 0 }) }} className="rounded px-2 py-1 hover:bg-white/10">Reset</button>
+            </div>
+          </div>
+        <div ref={figureViewport} data-figure-viewport tabIndex={0} aria-label="Variables; scroll to explore" className="relative min-h-0 flex-1 overflow-auto overscroll-contain p-5">
+        <div key={layoutVersion} className="flex min-h-full min-w-0 flex-wrap content-start items-start justify-center gap-5" style={{ zoom }}>
+          <AnimatePresence initial={false}>
             {shown.map((e) => {
               // On the last step nothing dims: the final state stays fully visible.
               const state: FigureState = changes[e.id] ? 'changed' : reads.has(e.id) ? 'read' : atLast ? 'rest' : 'idle'
@@ -104,10 +125,13 @@ export function TraceOverlay({ trace, voice, onClose }: { trace: CodeTrace; voic
                   pointers={pointers[e.id] ?? []}
                   emphasis={moment && (reads.has(e.id) || Boolean(changes[e.id])) ? index : undefined}
                   celebrate={done && finish.celebrate}
+                  dragBounds={figureViewport}
                 />
               )
             })}
           </AnimatePresence>
+        </div>
+        </div>
         </div>
         {/* the code */}
         <CodePanel trace={trace} step={step} index={index} />
@@ -123,6 +147,7 @@ export function TraceOverlay({ trace, voice, onClose }: { trace: CodeTrace; voic
         onTogglePause={player.togglePause}
         onSpeed={changeSpeed}
       />
+      </section>
     </motion.div>
   )
 }
@@ -156,7 +181,7 @@ function Caption({
   const ending = done && (finish.celebrate || trace.outcome?.status === 'mismatch')
   const key = ending ? 'finish' : `line-${index}`
   return (
-    <div className="flex min-h-[7.5rem] w-full shrink-0 items-end justify-center px-6 pt-8" role="status" aria-live="polite">
+    <div className="flex max-h-[18vh] w-full shrink-0 items-center justify-center overflow-auto px-5 pt-3" role="status" aria-live="polite">
       <AnimatePresence mode="wait">
         <motion.div
           key={key}
@@ -192,7 +217,7 @@ function Caption({
               )}
             </>
           ) : (
-            <div className="caption-line text-[19px] font-medium leading-snug">
+            <div className="caption-line text-[clamp(14px,1.5vw,19px)] font-medium leading-snug">
               <Markdown text={lineAt(trace, index)} />
             </div>
           )}
@@ -215,9 +240,16 @@ function CodePanel({ trace, step, index }: { trace: CodeTrace; step: TraceStep |
   const lines = useMemo(() => trace.code.split('\n'), [trace.code])
   const fontSize = lines.length <= 14 ? 18 : lines.length <= 24 ? 16 : lines.length <= 36 ? 14 : 12
   const panel = useRef<HTMLDivElement>(null)
+  const scroller = useRef<HTMLDivElement>(null)
   const lineRefs = useRef<(HTMLSpanElement | null)[]>([])
   const focusRef = useRef<HTMLSpanElement | null>(null)
   const [box, setBox] = useState<Box | null>(null)
+
+  useLayoutEffect(() => {
+    const line = step && lineRefs.current[step.line - 1]
+    const viewport = scroller.current
+    if (line && viewport) viewport.scrollTo({ top: Math.max(0, line.offsetTop - viewport.clientHeight / 2), behavior: 'smooth' })
+  }, [step])
 
   // Measure where the running part of the code is, and move the bright box there.
   useLayoutEffect(() => {
@@ -242,12 +274,13 @@ function CodePanel({ trace, step, index }: { trace: CodeTrace; step: TraceStep |
   const badge = step ? stepBadge(trace, step, index) : null
 
   return (
+    <div ref={scroller} data-code-viewport tabIndex={0} aria-label="Code; scroll to explore" className="min-h-0 min-w-0 overflow-auto overscroll-contain rounded-2xl border border-white/10 bg-zinc-950/90">
     <motion.div
       ref={panel}
-      initial={{ opacity: 0, x: 24 }}
-      animate={{ opacity: 1, x: 0 }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
       transition={{ duration: 0.6, ease: 'easeOut' }}
-      className="relative overflow-visible rounded-2xl border border-white/10 bg-zinc-950/90 px-6 py-5 font-mono"
+      className="relative min-w-max px-6 py-5 pr-40 font-mono"
       style={{ fontSize, lineHeight: 1.75 }}
     >
       {lines.map((text, i) => {
@@ -300,7 +333,7 @@ function CodePanel({ trace, step, index }: { trace: CodeTrace; step: TraceStep |
                 exit={{ opacity: 0 }}
                 transition={{ delay: 0.35, type: 'spring', stiffness: 260, damping: 20 }}
                 className={cx(
-                  'absolute left-full top-1/2 ml-3 -translate-y-1/2 whitespace-nowrap rounded-full px-2.5 py-0.5 font-sans text-[13px] font-semibold',
+                  'absolute left-full top-1/2 ml-3 max-w-32 -translate-y-1/2 truncate whitespace-nowrap rounded-full px-2.5 py-0.5 font-sans text-[13px] font-semibold',
                   badge.tone
                 )}
               >
@@ -311,6 +344,7 @@ function CodePanel({ trace, step, index }: { trace: CodeTrace; step: TraceStep |
         </motion.div>
       )}
     </motion.div>
+    </div>
   )
 }
 
@@ -354,8 +388,8 @@ function PlaybackControls({
     { id: 'fast', label: 'Fast' }
   ]
   return (
-    <div className="absolute inset-x-0 bottom-5 flex flex-col items-center gap-2" onClick={(event) => event.stopPropagation()}>
-      <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-zinc-950/95 p-2" role="group" aria-label="Animation controls">
+    <div className="flex shrink-0 flex-col items-center gap-2 border-t border-white/10 px-3 py-3" onClick={(event) => event.stopPropagation()}>
+      <div className="flex flex-wrap items-center justify-center gap-2 rounded-2xl border border-white/10 bg-zinc-950/95 p-2" role="group" aria-label="Animation controls">
         <button type="button" className={button} onClick={onBack} disabled={index <= 0} title="Go back one step and pause (Left arrow)">
           ← Back
         </button>

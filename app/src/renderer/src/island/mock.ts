@@ -39,17 +39,21 @@ const fakeTracer = (): TracerLike => {
       }, THINK_MS)
     )
   let snippet = ''
+  let guiding = false
   return {
     ask: (input) => {
+      guiding = false
       snippet = input.snippet
       return reply(input.animate, input.snippet)
     },
     // Nothing highlighted: the preview "reads" the code on the fake page, like Claude reads the screenshot.
     askScreen: (input) => {
+      guiding = Boolean(input.guide)
       snippet = currentCode()
+      if (guiding) return Promise.resolve({ message: 'I can see the duplicate-checking problem. Which part feels unclear: what counts as a duplicate, or what your code does?', trace: null })
       return reply(input.animate, snippet)
     },
-    followUp: (_text, animate) => reply(animate, snippet)
+    followUp: (_text, animate) => guiding ? Promise.resolve({ message: 'Let’s look at the example together. Which value appears more than once, and what would that tell you about the result?', trace: null }) : reply(animate, snippet)
   }
 }
 
@@ -68,7 +72,7 @@ export function createIslandMock(): IslandMock {
 
   const controller = new IslandController({
     makeTracer: fakeTracer,
-    capture: async () => null,
+    capture: async () => ({ data: 'mock-screen', mediaType: 'image/jpeg' }),
     emit: (view) => listeners.forEach((cb) => cb(view)),
     schedule: (fn, ms) => {
       const t = setTimeout(fn, ms)
@@ -89,6 +93,7 @@ export function createIslandMock(): IslandMock {
     setVoice: (on) => controller.setVoice(on),
     setExpanded: (open) => controller.setExpanded(open),
     askText: (text) => void controller.askText(text),
+    startGuidance: () => void controller.startGuidance(),
     replay: () => controller.replay(),
     finishAnimation: () => controller.finishAnimation(),
     hide: () => {

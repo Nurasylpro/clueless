@@ -256,7 +256,7 @@ export class Tracer implements TracerLike {
   async askScreen(input: ScreenQuestion): Promise<TraceReply> {
     this.code = ''
     const conv = (this.conv = this.newConversation())
-    const tag = input.animate ? '[ANIMATE ON] [SCREEN]' : '[ANIMATE OFF] [SCREEN]'
+    const tag = input.guide ? '[GUIDE] [ANIMATE OFF] [SCREEN]' : input.animate ? '[ANIMATE ON] [SCREEN]' : '[ANIMATE OFF] [SCREEN]'
     const images = input.image ? [input.image] : []
     const reply = fromTraceWire(await conv.request({ text: `${tag} ${input.question}`, images }, 'medium'), '')
     if (reply.trace) this.code = reply.trace.code // follow-ups are about the code it animated

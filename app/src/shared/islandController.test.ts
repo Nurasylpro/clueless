@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { IslandView } from './contracts'
-import { IslandController, NO_KEY_MESSAGE, type AskInput, type ScreenQuestion, type TracerLike } from './islandController'
+import { IslandController, NO_KEY_MESSAGE, type AskInput, type ScreenImage, type ScreenQuestion, type TracerLike } from './islandController'
 import type { CodeTrace, TraceReply } from './trace'
 
 const TRACE: CodeTrace = {
@@ -26,6 +26,7 @@ class FakeTracer implements TracerLike {
   asked: AskInput[] = []
   screen: ScreenQuestion[] = []
   followUps: string[] = []
+  followUpAnimation: boolean[] = []
   replies: TraceReply[] = []
   pending: ((r: TraceReply) => void) | null = null
   hold = false
@@ -37,8 +38,9 @@ class FakeTracer implements TracerLike {
     this.screen.push(input)
     return this.next()
   }
-  async followUp(text: string): Promise<TraceReply> {
+  async followUp(text: string, animate: boolean): Promise<TraceReply> {
     this.followUps.push(text)
+    this.followUpAnimation.push(animate)
     return this.next()
   }
   private next(): Promise<TraceReply> {
@@ -47,7 +49,7 @@ class FakeTracer implements TracerLike {
   }
 }
 
-function setup(opts: { tracer?: FakeTracer | null; animate?: boolean; voice?: boolean } = {}) {
+function setup(opts: { tracer?: FakeTracer | null; animate?: boolean; voice?: boolean; capture?: () => Promise<ScreenImage | null> } = {}) {
   const tracer = opts.tracer === undefined ? new FakeTracer() : opts.tracer
   const views: IslandView[] = []
   const timers: { fn: () => void; ms: number; cancelled: boolean }[] = []
@@ -58,7 +60,7 @@ function setup(opts: { tracer?: FakeTracer | null; animate?: boolean; voice?: bo
         made++
         return tracer
       },
-      capture: async () => ({ data: 'SCREEN', mediaType: 'image/jpeg' }),
+      capture: opts.capture ?? (async () => ({ data: 'SCREEN', mediaType: 'image/jpeg' })),
       emit: (v) => views.push(v),
       schedule: (fn, ms) => {
         const t = { fn, ms, cancelled: false }
@@ -79,6 +81,33 @@ function setup(opts: { tracer?: FakeTracer | null; animate?: boolean; voice?: bo
 }
 
 describe('IslandController', () => {
+  it('the logo starts screen coaching even with Animate on and an old highlight', async () => {
+    const { controller, tracer, last, timers } = setup()
+    await controller.ask('old_code()')
+    await controller.startGuidance()
+    expect(tracer!.screen.at(-1)).toMatchObject({ guide: true, animate: false, image: { data: 'SCREEN' } })
+    expect(last()).toMatchObject({ guiding: true, expanded: true, phase: 'answer', snippet: null, animate: true })
+    const activeTimers = timers.filter((timer) => !timer.cancelled)
+    expect(activeTimers).toHaveLength(0)
+    tracer!.replies.push({ message: 'One question.', trace: TRACE })
+    await controller.askText('I do not understand the condition')
+    expect(last().phase).toBe('answer') // no animation takes over the coaching conversation
+    expect(tracer!.followUps.at(-1)).toContain('condition')
+    expect(tracer!.followUpAnimation.at(-1)).toBe(false)
+    await controller.ask('new_code()')
+    expect(last().guiding).toBe(false)
+  })
+
+  it('explains a failed screen scan and can coach from the student’s description afterwards', async () => {
+    const { controller, tracer, last } = setup({ capture: async () => null })
+    await controller.startGuidance()
+    expect(last().error).toContain('couldn’t capture')
+    expect(tracer!.screen).toHaveLength(0)
+    await controller.askText('The problem asks whether there are duplicate numbers.')
+    expect(tracer!.screen.at(-1)).toMatchObject({ guide: true, animate: false, image: null })
+    expect(last()).toMatchObject({ animate: true, guiding: true, phase: 'answer', error: null })
+  })
+
   it('Animate on: the animation starts right away, with no text screen first; the recap waits in the card', async () => {
     const { controller, tracer, views, last } = setup()
     tracer!.replies.push({ message: 'The loop counts down to 0.', trace: TRACE })

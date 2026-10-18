@@ -9,7 +9,11 @@ Read it fully before editing.
 Clueless is a study helper that runs in the background as a small **island** (a pill) at the top of the
 screen. It explains and animates the student's code; it never writes their solution.
 
-The pill, left to right: **Logo · Mic · Animate · Voice · Expand (⌄)**. There is no Hide button.
+The pill, left to right: **Logo (screen coach) · Move grip · Mic · Animate · Voice · Expand (⌄)**. There is no Hide button.
+Drag the grip to move the island. Its per-display anchor survives card resizing, playback and hiding;
+`shared/islandPlacement.ts` clamps it to the work area, including displays with negative coordinates.
+The logo takes a fresh screenshot and starts screen coaching: one question at a time, in the card,
+regardless of Animate. Typed/spoken replies continue coaching; a new highlight starts normal Ask mode.
 
 - **Ctrl/Cmd+Shift+2** shows or hides the island. **Ctrl/Cmd+Shift+1** starts (or stops) the mic.
 - **Highlight code** in any app (LeetCode in Chrome, an editor...). When the mouse is released, an
@@ -26,10 +30,11 @@ What happens after asking:
 | **Animate on** (and it's code) | The full-screen animation starts **right away** (no text screen first). One short **line on top** says what each step does. | Same, and the voice **reads each line**; the next step waits until the line has been said. |
 | **Animate off** (or not code) | The card opens with the text answer. | The card opens with the text answer and it is **read aloud**. |
 
-- The animation: the screen dims; the line on top; the variables as simple figures on the left; the
-  code redrawn on the right with a bright box on the part that runs; controls at the bottom
+- The animation: a bounded central workspace; the line on top; scrollable variables on the left;
+  scrollable code on the right with a bright box on the part that runs; controls inside the workspace
   (**Back · Pause · Slow / Normal / Fast**). It plays once, freezes on the last step, and a click
-  anywhere (or Esc) closes it.
+  on the backdrop when done (or Close / Esc at any time) closes it. Variable names are drag handles;
+  zoom and Reset control the variable pane. Large traces must never grow the workspace off-screen.
 - The **recap** (under 60 words, "what the animation showed") only appears in the card, after the
   animation, when the student expands the island.
 - Animate on but the highlight isn't code: text in the card (read aloud with Voice on); it closes by
@@ -93,7 +98,7 @@ app/src/
       IslandScreen.tsx        the pill, the card, the mic UI, reading text answers aloud, the Ask button
       TraceOverlay.tsx        THE ANIMATION: caption on top, figures, code + spotlight, controls, speed
       tracePlayback.ts        THE CLOCK: holds per step, voice sync (Speaker), pause/back, speed
-      narrator.ts             THE VOICE OF THE ANIMATION: ElevenLabs with prefetch, rate, fallback
+      narrator.ts             THE VOICE OF THE ANIMATION: ElevenLabs with prefetch, rate, visible failures
       Figures.tsx             box / array / grid / set / map figures and their motion
       traceState.ts           values at a step, what changed, loop pass, pointers
       traceExpression.ts      meaningful moments, the finish message
@@ -160,9 +165,10 @@ the step data (`narrate.ts`), so the UI can trust every field. For a Python run,
   Pause keeps the time left; with voice, resume says the current line again from the start; Back is
   silent until resumed. `setRate` changes the pace mid-step. Speeds: **Slow 0.8, Normal 1, Fast 1.2**
   (remembered in localStorage `clueless.speed`).
-- **narrator.ts**: the `Speaker` for the animation. Downloads ElevenLabs audio for the next 3 lines
-  while one plays (no gaps), plays it at the chosen speed with the pitch kept, and falls back to the
-  computer's voice (then to a reading-time timer) so the animation never stalls.
+- **narrator.ts**: prefetches the next 3 lines and plays ElevenLabs audio at the chosen rate. The main
+  process serializes requests and retries rate limits. Real animations never replace Jessica with the
+  computer's voice: a failure shows a notice, holds for reading time, and tries the service on later
+  lines. Only the browser mock deliberately uses the computer's voice.
 - **Figures.tsx**: `changed` = white glow + amber pop/flash, `read` = thin outline, `idle` = dimmed,
   `rest` = nothing dims on the last step. Pointer chips (`↑ i`) under array cells.
 - **The spotlight** (`CodePanel`): a white rounded box springs to the `focus` text (or the lines);
@@ -187,7 +193,9 @@ the words on top match the picture and the voice; never give away the answer.**
 | A figure's look | `Figures.tsx` |
 | A new figure kind (stack, queue, tree...) | `EntityKind`/`EntityValue` in `trace.ts` -> `diff()` in `traceState.ts` -> a component in `Figures.tsx` -> describe it in both prompts -> `narrate.ts` wording -> fixture + test |
 | Claude effort / time limits | `traceEffort`, `TRACE_TIMEOUT_MS`, `NARRATE_TIMEOUT_MS` in `tracer.ts` (`CLUELESS_TRACE_EFFORT` in `.env` forces one) |
-| Island placement / sizes | `placeIsland()` in `main/windows/windows.ts` |
+| Island placement / sizes | `placeIsland()` in `main/windows/windows.ts`, remembered anchors in `main/index.ts`, pure bounds in `shared/islandPlacement.ts` |
+| Screen coach / logo | `startGuidance()` in `shared/islandController.ts`, `[GUIDE]` in the trace prompt, `ISLAND_IPC.guide` |
+| Workspace overflow / movement | central section and scroll panes in `TraceOverlay.tsx`; drag handles in `Figures.tsx` |
 | Test without Claude | `fixtures.ts` (demo traces with lines) + `npm run ui` |
 
 ## 9. Rules and gotchas
@@ -214,7 +222,8 @@ the words on top match the picture and the voice; never give away the answer.**
 ## 10. Product decisions already made (don't reopen without asking)
 
 - Hotkeys: Ctrl/Cmd+Shift+2 island, Ctrl/Cmd+Shift+1 mic. Nothing else.
-- Pill: Logo · Mic · Animate · Voice · Expand. No Hide button, no hint/finish/recap buttons.
+- Pill: clickable Logo · Move grip · Mic · Animate · Voice · Expand. No Hide button. The logo starts
+  screen coaching rather than opening the parked tutor UI.
 - Animate on: no intro text screen; straight into the animation with a line on top; the recap
   (<60 words) only in the card afterwards. Text disappears from everywhere else.
 - Voice on: every line on top is read aloud and the animation waits for it. Text answers are read aloud.

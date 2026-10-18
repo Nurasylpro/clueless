@@ -19,6 +19,7 @@ export interface AskInput {
 }
 
 export interface ScreenQuestion {
+  guide?: boolean
   question: string // typed or spoken, with nothing highlighted
   image: ScreenImage | null
   animate: boolean
@@ -108,14 +109,15 @@ export class IslandController {
     const question = text.trim()
     if (!question || this.view.phase === 'thinking' || this.view.phase === 'playing') return
     const run = this.restart()
-    const animate = this.view.animate
+    const guiding = this.view.guiding
+    const animate = this.view.animate && !guiding
     let tracer = this.tracer
     const fresh = !tracer
     if (fresh) {
       tracer = this.deps.makeTracer()
       this.tracer = tracer
       const { voice, playId } = this.view
-      this.view = { ...freshView(animate, voice), playId }
+      this.view = { ...freshView(this.view.animate, voice), playId, guiding }
     }
     this.view.messages.push({ role: 'student', text: question })
     this.view.expanded = true
@@ -128,7 +130,28 @@ export class IslandController {
     await this.attempt(run, animate, async () => {
       if (!fresh) return t.followUp(question, animate)
       const image = await this.deps.capture()
-      return run === this.run ? t.askScreen({ question, image, animate }) : null
+      return run === this.run ? t.askScreen({ question, image, animate, ...(guiding ? { guide: true } : {}) }) : null
+    })
+  }
+
+  /** The logo starts a fresh screen scan, independent of any old highlighted-code conversation. */
+  async startGuidance(): Promise<void> {
+    if (this.view.phase === 'thinking') return
+    const run = this.restart()
+    const tracer = this.deps.makeTracer()
+    this.tracer = tracer
+    const { animate, voice, playId } = this.view
+    this.view = { ...freshView(animate, voice), playId, guiding: true, expanded: true, phase: 'thinking', busySince: this.deps.now() }
+    this.emit()
+    if (!tracer) return this.fail(run, NO_KEY_MESSAGE)
+    await this.attempt(run, false, async () => {
+      const image = await this.deps.capture()
+      if (run !== this.run) return null
+      if (!image) {
+        this.tracer = null
+        throw new Error('I couldn’t capture your screen. Try the logo again, or describe where you are stuck.')
+      }
+      return tracer.askScreen({ question: 'Help me work through what is on my screen. First find out where I am stuck.', image, animate: false, guide: true })
     })
   }
 
@@ -249,6 +272,7 @@ export class IslandController {
 
 function freshView(animate: boolean, voice: boolean): IslandView {
   return {
+    guiding: false,
     animate,
     voice,
     expanded: false,

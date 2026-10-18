@@ -50,6 +50,7 @@ const island: IslandApi = {
   setVoice: (on) => ipcRenderer.send(ISLAND_IPC.setVoice, on),
   setExpanded: (open) => ipcRenderer.send(ISLAND_IPC.setExpanded, open),
   askText: (text) => ipcRenderer.send(ISLAND_IPC.askText, text),
+  startGuidance: () => ipcRenderer.send(ISLAND_IPC.guide),
   replay: () => ipcRenderer.send(ISLAND_IPC.replay),
   finishAnimation: () => ipcRenderer.send(ISLAND_IPC.finish),
   resize: (size) => ipcRenderer.send(ISLAND_IPC.resize, size),
