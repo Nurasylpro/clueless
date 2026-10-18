@@ -196,16 +196,3 @@ body.mock-desktop {
 .mic-pulse {
   animation: mic-pulse 1.2s infinite;
 }
-
-/* The island: the 4 s bar before an animation starts (READ_BEFORE_ANIMATION_MS). */
-@keyframes island-fill {
-  from {
-    width: 0%;
-  }
-  to {
-    width: 100%;
-  }
-}
-.island-fill {
-  animation: island-fill 4s linear forwards;
-}

@@ -177,10 +177,6 @@ export const MOCK_RECAP: Recap = {
     { type: 'recall_slip', topic: 'python list of sets' },
     { type: 'strategy_gap', topic: 'sudoku box index' }
   ],
-  flashcards: [
-    { front: 'Python: make a list of 9 empty sets', back: '`[set() for _ in range(9)]` (not `[set()] * 9`)' },
-    { front: 'Which 3×3 box is cell `(r, c)` in?', back: '`(r // 3) * 3 + c // 3`' }
-  ],
   similarProblem: 'LeetCode 217: Contains Duplicate'
 }
 

@@ -22,18 +22,21 @@ Tick a box by changing `- [ ]` to `- [x]`.
 - [x] Animate my code / the problem / the question, with a renderer for every visual type — Nurassyl
 - [x] Code mode (drawn over your code) and explain mode (next to the conversation) — Nurassyl
 - [x] Island: highlight code, Ask, watch a step-by-step trace (Cmd/Ctrl+Shift+3) — Nurassyl
+- [x] Ask's animations drawn on the real screen (browser, PDF, editor); the answer in the panel; the pill is just two switches — Ali
+- [x] Faster animations: Python is run for real (Pyodide) instead of the model writing the trace — Ali
+- [x] Voice and animation in sync: each step is read aloud and the next waits for it — Ali
 
 **Housekeeping**
 - [x] Restored work lost in the PR #3 merge, island as its own mode (PR #4) — Ali
-- [x] Tests (98), typecheck, smoke test of the panel and the island
+- [x] Sonnet 5.5 for the tutor, Haiku 5.5 for small jobs, and a 15-problem model test set (`npm run eval`) — Ali
+- [x] Removed flashcards (the recap and the gap list stay) — Ali
+- [x] Tests (118), typecheck, smoke test of the panel, the island, Python runs and the stage
 
 ## Next
 
-- [ ] Voice and animation in sync: each step is spoken while it's shown
-- [ ] Animations drawn on the real screen (browser, PDF, editor) instead of the separate island
-- [ ] Faster animations: run the code to get the trace instead of having the model write it
-- [ ] Cheaper, faster models per task (Sonnet 5.5 / Haiku 5.5 instead of Opus everywhere), checked on a small test set
-- [ ] Remove flashcards (keep the recap and the gap list)
+- [ ] Run the model test set on Sonnet and Haiku (`npm run eval`) once Bedrock access to them is on
+- [ ] Run more languages for real (JavaScript next); Claude traces them for now
+- [ ] Follow the code when the page scrolls, instead of stopping the animation
 
 ## Before the demo
 

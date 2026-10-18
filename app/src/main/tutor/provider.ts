@@ -17,9 +17,23 @@ export function detectProvider(env: Env = process.env): Provider | null {
   return null
 }
 
-export function defaultModel(provider: Provider): string {
+/**
+ * Which job a model does. "tutor": the problem conversation (hidden solution, hints), where being
+ * right matters most. "fast": small jobs where speed matters most (Ask on a highlight, setting up a
+ * code run, follow-ups).
+ */
+export type ModelRole = 'tutor' | 'fast'
+
+const DEFAULT_MODELS: Record<ModelRole, string> = { tutor: 'claude-sonnet-5-5', fast: 'claude-haiku-5-5' }
+
+export function defaultModel(provider: Provider, role: ModelRole = 'tutor'): string {
   // Bedrock model IDs carry an `anthropic.` prefix.
-  return provider === 'bedrock' ? 'anthropic.claude-opus-5-5' : 'claude-opus-5-5'
+  return provider === 'bedrock' ? `anthropic.${DEFAULT_MODELS[role]}` : DEFAULT_MODELS[role]
+}
+
+/** Server-side refusal fallbacks aren't offered for Haiku. */
+export function supportsServerFallbacks(model: string): boolean {
+  return !/haiku/i.test(model)
 }
 
 export function bedrockRegion(env: Env = process.env): string {
@@ -28,7 +42,10 @@ export function bedrockRegion(env: Env = process.env): string {
 
 export interface ProviderInfo {
   provider: Provider
+  /** The tutor model (CLUELESS_MODEL). */
   model: string
+  /** The model for small jobs (CLUELESS_FAST_MODEL). */
+  fastModel: string
   region: string | null
 }
 
@@ -37,24 +54,26 @@ export function providerInfo(env: Env = process.env): ProviderInfo | null {
   if (!provider) return null
   return {
     provider,
-    model: env.CLUELESS_MODEL?.trim() || defaultModel(provider),
+    model: env.CLUELESS_MODEL?.trim() || defaultModel(provider, 'tutor'),
+    fastModel: env.CLUELESS_FAST_MODEL?.trim() || defaultModel(provider, 'fast'),
     region: provider === 'bedrock' ? bedrockRegion(env) : null
   }
 }
 
 /**
- * Build the transport the Tutor uses. Returns null when nothing is configured.
+ * Build a transport for one job (`role`). Returns null when nothing is configured.
  * - Claude API: structured outputs + server-side refusal fallbacks.
  * - Bedrock: no structured outputs there, so Claude answers through a `reply` tool; refusal
  *   fallbacks run client-side through the SDK middleware (with a plain client kept as backup).
  */
-export function createTransport(env: Env = process.env): (TutorTransport & ProviderInfo) | null {
-  const info = providerInfo(env)
-  if (!info) return null
+export function createTransport(env: Env = process.env, role: ModelRole = 'tutor'): (TutorTransport & ProviderInfo) | null {
+  const found = providerInfo(env)
+  if (!found) return null
+  const info = { ...found, model: role === 'tutor' ? found.model : found.fastModel }
 
   if (info.provider === 'anthropic') {
     const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY })
-    return { ...info, client: client as unknown as ClaudeClient, mode: 'structured', serverFallbacks: true }
+    return { ...info, client: client as unknown as ClaudeClient, mode: 'structured', serverFallbacks: supportsServerFallbacks(info.model) }
   }
 
   const options = { awsRegion: info.region ?? undefined, ...(env.AWS_PROFILE ? { awsProfile: env.AWS_PROFILE } : {}) }

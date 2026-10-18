@@ -1,7 +1,8 @@
 // Clueless main process: windows, hotkeys, screen capture and IPC.
 // Two ways in:
 //   - the tutor panel (the main app): Ctrl/Cmd+Shift+Space reads the screen, +2 selects an area, +1 voice
-//   - the island (Ctrl/Cmd+Shift+3): highlight code anywhere, click Ask, watch it run step by step
+//   - the island (Ctrl/Cmd+Shift+3): highlight code anywhere, click Ask: the answer shows in the
+//     panel and, with Animate on, the code runs step by step right on top of it
 import {
   app,
   BrowserWindow,
@@ -16,13 +17,13 @@ import {
   type Rectangle
 } from 'electron'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, sep } from 'node:path'
 import {
   IPC,
   ISLAND_IPC,
   type AppStatus,
+  type CodeSpot,
   type IslandView,
-  type CardRating,
   type InputKind,
   type Rect,
   type SessionView,
@@ -33,7 +34,8 @@ import {
   type UserAction,
   type WindowMode
 } from '../shared/contracts'
-import { IslandController, type ScreenImage } from '../shared/islandController'
+import { IslandController, type IslandCapture } from '../shared/islandController'
+import { normalizeSnippet } from '../shared/trace'
 import {
   activeDisplay,
   captureDisplay,
@@ -45,7 +47,9 @@ import {
 } from './capture/capture'
 import { loadEnvFiles } from './env'
 import { SelectionWatcher, type Point } from './island/selection'
+import { grayFromBitmap, spotFromSelection } from './island/spot'
 import { Tracer } from './island/tracer'
+import { PythonRunner, toCodeTrace } from './run/python'
 import { MemoryStore } from './memory/store'
 import { SessionController, type AreaCapture } from './session'
 import { StuckDetector } from './stuck/detector'
@@ -65,8 +69,7 @@ import {
   resizePanelWidth,
   resolveAreaSelection,
   selectArea,
-  setPanelMode,
-  type IslandMode
+  setPanelMode
 } from './windows/windows'
 
 const HOTKEYS = { ask: 'CommandOrControl+Shift+Space', area: 'CommandOrControl+Shift+2' }
@@ -82,9 +85,12 @@ let stageShow: StageShow | null = null
 let island: BrowserWindow | null = null
 let askButton: BrowserWindow | null = null
 let islandDisplay: Display
-let islandMode: IslandMode = 'pill'
-let contentSize = { width: 320, height: 64 } // what the island's UI measured for the pill / card
-let pendingSnippet: string | null = null
+let pillSize = { width: 320, height: 64 } // what the pill measured itself at
+let islandView: IslandView | null = null // the latest, for the stage
+let askOnHighlight = true
+/** The latest highlight: its text and where the drag started and ended (DIP). */
+let pendingSelection: { text: string; from: Point; to: Point } | null = null
+let askedSelection: { text: string; from: Point; to: Point } | null = null
 let askTimer: NodeJS.Timeout | null = null
 let capturing = false
 const hotkeyErrors: string[] = []
@@ -207,12 +213,32 @@ function isStagePlay(value: unknown): value is StagePlay {
   )
 }
 
-function sendStage(): void {
-  if (stage && !stage.isDestroyed() && stageLoaded) stage.webContents.send(IPC.stageShow, stageShow)
+function displayById(id: number): Display {
+  return screen.getAllDisplays().find((d) => d.id === id) ?? activeDisplay()
 }
 
-function playOnScreen(play: StagePlay): void {
-  const display = screen.getAllDisplays().find((d) => d.id === play.area.displayId) ?? activeDisplay()
+/** Where the panel is on `display`, so drawings don't land under it. */
+function panelOn(display: Display): Rect | null {
+  const panel = overlay?.isVisible() ? overlay.getBounds() : null
+  return panel && { x: panel.x - display.bounds.x, y: panel.y - display.bounds.y, width: panel.width, height: panel.height }
+}
+
+function sendStage(): void {
+  if (!stage || stage.isDestroyed() || !stageLoaded) return
+  stage.webContents.send(IPC.stageShow, stageShow)
+  const display = islandView?.spot ? displayById(islandView.spot.displayId) : null
+  stage.webContents.send(IPC.stageIsland, { view: islandView, avoid: display ? panelOn(display) : null })
+}
+
+/** The stage is up while the tutor plays a visual over the code, or the island animates a highlight. */
+function updateStage(): void {
+  const islandDrawing = Boolean(islandView?.playback && islandView.trace && islandView.spot)
+  const display = stageShow ? displayById(stageShow.area.displayId) : islandDrawing ? displayById(islandView!.spot!.displayId) : null
+  if (!display) {
+    sendStage()
+    if (stage && !stage.isDestroyed()) stage.hide()
+    return
+  }
   if (!stage || stage.isDestroyed()) {
     const win = createStage(display)
     stage = win
@@ -226,23 +252,18 @@ function playOnScreen(play: StagePlay): void {
     })
   }
   stage.setBounds(display.bounds)
-  // Tell the stage where the panel is, so the animation doesn't land under it.
-  const panel = overlay?.isVisible() ? overlay.getBounds() : null
-  const avoid = panel && {
-    x: panel.x - display.bounds.x,
-    y: panel.y - display.bounds.y,
-    width: panel.width,
-    height: panel.height
-  }
-  stageShow = { ...play, avoid }
   sendStage()
-  stage.showInactive()
+  if (!SMOKE && !stage.isVisible()) stage.showInactive()
+}
+
+function playOnScreen(play: StagePlay): void {
+  stageShow = { ...play, avoid: panelOn(displayById(play.area.displayId)) }
+  updateStage()
 }
 
 function stopOnScreen(): void {
   stageShow = null
-  sendStage()
-  if (stage && !stage.isDestroyed()) stage.hide()
+  updateStage()
 }
 
 async function captureScreen(): Promise<ImageInput | null> {
@@ -290,16 +311,29 @@ function openScreenSettings(): void {
 
 // ---------- the island: highlight code -> Ask -> text, then the step-by-step animation ----------
 
+let runner: PythonRunner | null = null
+
+/** Runs Python highlights (Pyodide). Unpacked from the asar in the built app, since it reads its own files. */
+function pythonRunner(): PythonRunner {
+  runner ??= new PythonRunner(join(app.getAppPath(), 'node_modules', 'pyodide').replace(`app.asar${sep}`, `app.asar.unpacked${sep}`))
+  return runner
+}
+
 const islandController = new IslandController({
   makeTracer: () => {
     loadKeys() // pick up a key added since launch
-    const transport = createTransport()
-    return transport ? new Tracer(transport, log) : null
+    const tutor = createTransport(process.env, 'tutor')
+    const fast = createTransport(process.env, 'fast')
+    return tutor && fast ? new Tracer({ tutor, fast }, pythonRunner(), log) : null
   },
   capture: captureForIsland,
   emit: (view) => {
-    if (island && !island.isDestroyed()) island.webContents.send(ISLAND_IPC.view, view)
-    applyIslandMode(islandModeFor(view))
+    const asked = view.phase !== 'idle' && (islandView?.phase ?? 'idle') === 'idle'
+    islandView = view
+    for (const w of [island, overlay]) if (w && !w.isDestroyed()) w.webContents.send(ISLAND_IPC.view, view)
+    // The answer shows in the panel: bring it up, without taking focus from the student's app.
+    if (asked && overlay && !overlay.isVisible()) overlay.showInactive()
+    updateStage()
   },
   schedule: (fn, ms) => {
     const t = setTimeout(fn, ms)
@@ -308,39 +342,60 @@ const islandController = new IslandController({
   now: () => Date.now()
 })
 
-function islandModeFor(view: IslandView): IslandMode {
-  return view.phase === 'playing' ? 'full' : view.phase === 'idle' ? 'pill' : 'card'
+function placePill(): void {
+  if (island && !island.isDestroyed()) placeIsland(island, islandDisplay, pillSize)
 }
 
-function applyIslandMode(mode: IslandMode): void {
-  if (!island || island.isDestroyed()) return
-  const wasFull = islandMode === 'full'
-  islandMode = mode
-  placeIsland(island, islandDisplay, mode, contentSize)
-  if (mode === 'full' && !wasFull) island.focus() // so Esc reaches the animation
-}
-
-/** A screenshot of the display the student is working on, with Clueless's own windows hidden. */
-async function captureForIsland(): Promise<ScreenImage | null> {
+/** A screenshot of the display the student is working on (Clueless's own windows hidden), and
+ *  where the highlighted lines are on it. */
+async function captureForIsland(snippet: string): Promise<IslandCapture> {
+  const selection = askedSelection
+  const display = islandDisplay
   try {
     return await withPanelHidden(async () => {
-      const image = await captureDisplay(islandDisplay)
-      return image ? toModelImage(image) : null
+      const image = await captureDisplay(display)
+      const spot = selection ? findSpot(selection, snippet, display, image) : null
+      return { image: image ? toModelImage(image) : null, spot }
     })
   } catch (err) {
     log(`capture failed: ${(err as Error).message}`)
-    return null
+    return { image: null, spot: null }
   }
+}
+
+function findSpot(selection: { from: Point; to: Point }, snippet: string, display: Display, image: NativeImage | null): CodeSpot {
+  const local = (p: Point): Point => ({ x: p.x - display.bounds.x, y: p.y - display.bounds.y })
+  const from = local(selection.from)
+  const to = local(selection.to)
+  const lines = normalizeSnippet(snippet).split('\n').length
+  let gray = null
+  if (image && !image.isEmpty()) {
+    // Just the screen around the highlight, at one pixel per DIP.
+    const scale = image.getSize().width / display.bounds.width
+    const x0 = Math.max(0, Math.min(from.x, to.x) - 500)
+    const x1 = Math.min(display.bounds.width, Math.max(from.x, to.x) + 700)
+    const y0 = Math.max(0, Math.min(from.y, to.y) - 80)
+    const y1 = Math.min(display.bounds.height, Math.max(from.y, to.y) + 80)
+    if (x1 > x0 && y1 > y0) {
+      const crop = image.crop({ x: Math.round(x0 * scale), y: Math.round(y0 * scale), width: Math.round((x1 - x0) * scale), height: Math.round((y1 - y0) * scale) })
+      const size = crop.getSize()
+      gray = grayFromBitmap(crop.toBitmap(), size.width, size.height, scale, x0, y0)
+    }
+  }
+  const spot = spotFromSelection(from, to, lines, display.id, gray)
+  log(`spot: ${lines} lines, top ${spot.top}, line ${spot.lineHeight.toFixed(1)}px, x ${spot.left}..${spot.left + spot.width}`)
+  return spot
 }
 
 const watcher = new SelectionWatcher({
   isOwnWindowAt: (p) =>
     [overlay, island, askButton].some((w) => w && !w.isDestroyed() && w.isVisible() && contains(w.getBounds(), p)),
-  paused: () => islandMode === 'full',
-  onSelection: (text, at) => {
-    pendingSnippet = text
+  paused: () => !askOnHighlight,
+  onSelection: (text, at, from) => {
+    pendingSelection = { text, from, to: at }
     showAskButton(at)
   },
+  onScroll: () => islandController.scrolled(),
   onOtherInput: (at) => {
     if (!askButton?.isVisible()) return
     if (!at || !contains(askButton.getBounds(), at)) hideAskButton()
@@ -370,18 +425,19 @@ function hideAskButton(): void {
 }
 
 function onIslandAsk(): void {
-  const snippet = pendingSnippet
+  const selection = pendingSelection
   const at = askButton?.getBounds()
   hideAskButton()
-  if (!snippet) return
+  if (!selection) return
   if (at) islandDisplay = screen.getDisplayMatching(at)
-  void islandController.ask(snippet)
+  askedSelection = selection
+  void islandController.ask(selection.text)
 }
 
 function showIsland(): void {
   if (!island) return
   islandDisplay = activeDisplay()
-  applyIslandMode(islandModeFor(islandController.current))
+  placePill()
   island.showInactive() // keep the student's app (and its highlight) focused
   try {
     watcher.start()
@@ -393,7 +449,7 @@ function showIsland(): void {
 function hideIsland(): void {
   watcher.stop()
   hideAskButton()
-  islandController.closeCard()
+  islandController.close()
   island?.hide()
 }
 
@@ -457,10 +513,6 @@ function setup(): void {
   ipcMain.handle(IPC.getStatus, () => status())
   ipcMain.handle(IPC.getSession, () => controller.current)
   ipcMain.handle(IPC.getMemory, () => store.view())
-  ipcMain.handle(IPC.rateCard, (_e, arg: { id: string; rating: CardRating }) => {
-    if (typeof arg?.id === 'string' && [1, 2, 3, 4].includes(arg.rating)) store.rate(arg.id, arg.rating)
-    return store.view()
-  })
   ipcMain.on(IPC.ask, (_e, mode: 'screen' | 'area') => void ask(mode === 'area' ? 'area' : 'screen'))
   ipcMain.on(IPC.askText, (_e, text: string) => {
     if (typeof text !== 'string' || !text.trim()) return
@@ -499,18 +551,32 @@ function setup(): void {
 
   ipcMain.handle(ISLAND_IPC.getView, () => islandController.current)
   ipcMain.on(ISLAND_IPC.setAnimate, (_e, on: unknown) => islandController.setAnimate(Boolean(on)))
+  ipcMain.on(ISLAND_IPC.setAskOnHighlight, (_e, on: unknown) => {
+    askOnHighlight = Boolean(on)
+    if (!askOnHighlight) hideAskButton()
+    islandController.setAskOnHighlight(askOnHighlight)
+  })
   ipcMain.on(ISLAND_IPC.followUp, (_e, text: unknown) => {
     if (typeof text === 'string') void islandController.followUp(text.slice(0, 2000))
   })
-  ipcMain.on(ISLAND_IPC.closeCard, () => islandController.closeCard())
-  ipcMain.on(ISLAND_IPC.finish, () => islandController.finishAnimation())
+  ipcMain.on(ISLAND_IPC.close, () => islandController.close())
   ipcMain.on(ISLAND_IPC.hide, () => hideIsland())
-  ipcMain.on(ISLAND_IPC.hold, (_e, hold: unknown) => islandController.holdCard(Boolean(hold)))
   ipcMain.on(ISLAND_IPC.ask, () => onIslandAsk())
+  ipcMain.on(ISLAND_IPC.play, () => islandController.play())
+  ipcMain.on(ISLAND_IPC.pause, () => islandController.pause())
+  ipcMain.on(ISLAND_IPC.step, (_e, delta: unknown) => {
+    if (typeof delta === 'number') islandController.step(delta)
+  })
+  ipcMain.on(ISLAND_IPC.replay, () => islandController.replay())
+  ipcMain.on(ISLAND_IPC.stop, () => islandController.stopPlayback())
+  ipcMain.on(ISLAND_IPC.stepDone, (_e, arg: { nonce?: unknown; index?: unknown }) => {
+    if (typeof arg?.nonce === 'number' && typeof arg.index === 'number') islandController.stepDone(arg.nonce, arg.index)
+  })
+  ipcMain.on(ISLAND_IPC.narrated, (_e, on: unknown) => islandController.setNarrated(Boolean(on)))
   ipcMain.on(ISLAND_IPC.resize, (_e, size: { width: number; height: number }) => {
     if (!Number.isFinite(size?.width) || !Number.isFinite(size?.height) || size.width < 1 || size.height < 1) return
-    contentSize = { width: size.width, height: size.height }
-    if (island && islandMode !== 'full') placeIsland(island, islandDisplay, islandMode, contentSize)
+    pillSize = { width: size.width, height: size.height }
+    placePill()
   })
   ipcMain.handle(IPC.voiceMicAccess, async () => {
     // macOS asks the student once; Windows uses its own privacy setting and Chromium handles it.
@@ -544,6 +610,7 @@ function setup(): void {
   overlay.webContents.on('render-process-gone', () => voice.cancelAll())
 
   islandDisplay = activeDisplay()
+  setTimeout(() => pythonRunner().warm(), 3000) // load Python in the background, so the first run is quick
   island = createIsland()
   island.on('closed', () => (island = null))
   askButton = createAskButton()
@@ -558,14 +625,34 @@ function setup(): void {
   }))
 
   if (SMOKE) {
-    // `CLUELESS_SMOKE=1 npm start`: load the panel and the island hidden, check both rendered, quit.
+    // `CLUELESS_SMOKE=1 npm start`: load the panel and the island hidden, check both rendered, run
+    // a little Python in the worker, have the (hidden) stage draw that run, then quit.
     overlay.webContents.once('did-finish-load', async () => {
       await sleep(2500)
       const ready = 'Boolean(document.querySelector("[data-app-ready]"))'
       const panelOk = await overlay?.webContents.executeJavaScript(ready)
       const islandOk = await island?.webContents.executeJavaScript(ready)
-      const ok = Boolean(panelOk && islandOk)
-      console.log(ok ? 'SMOKE OK' : `SMOKE FAIL: panel ${panelOk ? 'ok' : 'did not render'}, island ${islandOk ? 'ok' : 'did not render'}`)
+      const code = 'x = 1\ny = x + 1'
+      const run = await pythonRunner()
+        .trace(code, { setup: '', call: '' })
+        .catch((err: Error) => (log(`smoke: python failed: ${err.message}`), null))
+      const trace = run ? toCodeTrace(run, code) : null
+      const pythonOk = trace?.steps.length === 2
+      islandView = {
+        ...islandController.current,
+        phase: 'answer',
+        trace,
+        spot: { displayId: activeDisplay().id, left: 200, width: 300, top: 200, lineHeight: 22, lines: 2 },
+        playback: { nonce: 1, index: 0, playing: false }
+      }
+      updateStage()
+      await sleep(2000)
+      const stageOk = await stage?.webContents.executeJavaScript('Boolean(document.querySelector("[data-trace-stage]"))')
+      const parts = { panel: panelOk, island: islandOk, python: pythonOk, stage: stageOk }
+      const ok = Object.values(parts).every(Boolean)
+      const failed = Object.entries(parts).filter(([, v]) => !v).map(([k]) => k)
+      console.log(ok ? 'SMOKE OK' : `SMOKE FAIL: ${failed.join(', ')} did not work`)
+      runner?.dispose()
       app.exit(ok ? 0 : 1)
     })
     return

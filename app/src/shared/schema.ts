@@ -139,7 +139,6 @@ export const WireProblem = z.object({
 export const WireRecap = z.object({
   explainBack: z.string(),
   gaps: z.array(z.object({ type: GapType, topic: z.string() })),
-  flashcards: z.array(z.object({ front: z.string(), back: z.string() })),
   similarProblem: z.string() // "" = none
 })
 

@@ -1,6 +1,9 @@
-// "Ask" on highlighted text: one conversation with Claude per highlight. With Animate on it runs
-// at max effort and comes back with a full step-by-step trace of the code. No Electron imports,
-// so scripts/try-trace.mts and the tests use it directly.
+// "Ask" on highlighted text: one conversation per highlight.
+// - Animate off, or not code: the fast model (Haiku) explains it.
+// - Animate on, Python: the fast model picks an input and how to call the code, and the app runs
+//   it for real (src/main/run) to get every step. If the run can't start, Claude writes the trace.
+// - Animate on, other languages: the tutor model (Sonnet) writes the step-by-step trace.
+// No Electron imports, so scripts/try-trace.mts and the tests use it directly.
 import Anthropic, { BetaFallbackState } from '@anthropic-ai/sdk'
 import type {
   BetaContentBlockParam,
@@ -8,9 +11,10 @@ import type {
   BetaMessageParam
 } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import { z } from 'zod'
-import { fromTraceWire, normalizeSnippet, numberLines, TraceWire, type TraceReply } from '../../shared/trace'
+import { fromTraceWire, normalizeSnippet, numberLines, TraceWire, type TraceReply, type TraceWireT } from '../../shared/trace'
 import { errorMessage, TutorError, type ImageInput, type TutorTransport } from '../tutor/tutor'
 import type { AskInput, TracerLike } from '../../shared/islandController'
+import { looksLikePython, toCodeTrace, type PythonRunner } from '../run/python'
 import { TRACE_PROMPT } from './prompt'
 
 /** Room for long traces; streaming keeps a long answer from hitting an HTTP timeout. */
@@ -55,45 +59,24 @@ interface Turn {
   toolError?: string
 }
 
-export class Tracer implements TracerLike {
-  /** The whole conversation about this highlight. Append-only. */
+/** One conversation with one model: the wire replies, Bedrock tool mode and fallbacks included. */
+class Conversation {
+  /** Append-only. */
   readonly messages: BetaMessageParam[] = []
   private readonly fallbackState = new BetaFallbackState()
   private pendingToolUseId: string | null = null
-  private code = ''
   private client: StreamingClient
   private useServerFallbacks: boolean
 
   constructor(
-    private readonly transport: TutorTransport,
-    private readonly log: (line: string) => void = () => {},
-    /** Force one effort level for animations (tests, `npm run trace --effort`); undefined = pick by code size. */
-    private readonly effortOverride: Effort | undefined = envEffort()
+    readonly transport: TutorTransport,
+    private readonly log: (line: string) => void
   ) {
     this.client = transport.client as unknown as StreamingClient
     this.useServerFallbacks = transport.serverFallbacks
   }
 
-  ask(input: AskInput): Promise<TraceReply> {
-    this.code = normalizeSnippet(input.snippet)
-    const text = [
-      input.animate ? '[ANIMATE ON]' : '[ANIMATE OFF]',
-      'The student highlighted this:',
-      numberLines(this.code)
-    ].join('\n')
-    return this.request({ text, images: input.image ? [input.image] : [] }, this.effortFor(input.animate, this.code))
-  }
-
-  followUp(text: string, animate: boolean): Promise<TraceReply> {
-    return this.request({ text: `${animate ? '[ANIMATE ON]' : '[ANIMATE OFF]'} [FOLLOW-UP] ${text}` }, this.effortFor(animate, this.code))
-  }
-
-  private effortFor(animate: boolean, code: string): Effort {
-    if (this.effortOverride) return this.effortOverride
-    return animate ? traceEffort(code) : 'medium'
-  }
-
-  private async request(turn: Turn, effort: Effort, retries = 1): Promise<TraceReply> {
+  async request(turn: Turn, effort: Effort, retries = 1): Promise<TraceWireT> {
     this.messages.push(this.userMessage(turn))
     const started = Date.now()
     let response: BetaMessage
@@ -111,7 +94,7 @@ export class Tracer implements TracerLike {
     this.pendingToolUseId = null
     this.messages.push({ role: 'assistant', content: response.content as unknown as BetaContentBlockParam[] })
     const u = response.usage
-    this.log(`trace: ${effort} ${Date.now() - started}ms in=${u.input_tokens} cached=${u.cache_read_input_tokens ?? 0} out=${u.output_tokens}`)
+    this.log(`ask ${this.transport.model}: ${effort} ${Date.now() - started}ms in=${u.input_tokens} cached=${u.cache_read_input_tokens ?? 0} out=${u.output_tokens}`)
 
     if (response.stop_reason === 'refusal') throw new TutorError("Clueless can't help with this one.", 'refusal')
     if (response.stop_reason === 'max_tokens') throw new TutorError('The answer was too long and got cut off. Try a shorter highlight.', 'max_tokens')
@@ -126,7 +109,7 @@ export class Tracer implements TracerLike {
       }
       const parsed = TraceWire.safeParse(json)
       if (!parsed.success) throw new TutorError('Clueless got an unexpected reply. Try again.', 'bad_output')
-      return fromTraceWire(parsed.data, this.code)
+      return parsed.data
     }
 
     // Bedrock: the reply is the `reply` tool's input. One retry if it's missing or malformed.
@@ -134,10 +117,10 @@ export class Tracer implements TracerLike {
     if (call && call.type === 'tool_use') {
       this.pendingToolUseId = call.id
       const parsed = TraceWire.safeParse(call.input)
-      if (parsed.success) return fromTraceWire(parsed.data, this.code)
+      if (parsed.success) return parsed.data
       if (retries > 0) {
         const problems = parsed.error.issues.slice(0, 6).map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')
-        this.log(`trace: reply didn't match the schema (${problems}), asking again`)
+        this.log(`ask: reply didn't match the schema (${problems}), asking again`)
         return this.request({ text: '', toolError: `That reply didn't match the schema (${problems}). Call reply again with every field filled.` }, effort, retries - 1)
       }
     } else if (retries > 0) {
@@ -192,16 +175,105 @@ export class Tracer implements TracerLike {
     } catch (err) {
       if (!(err instanceof Anthropic.BadRequestError) || !/fallback|beta|credit/i.test(err.message)) throw err
       if (this.useServerFallbacks) {
-        this.log('trace: server-side fallbacks not available, continuing without them')
+        this.log('ask: server-side fallbacks not available, continuing without them')
         this.useServerFallbacks = false
       } else if (this.transport.plainClient && this.client !== (this.transport.plainClient as unknown)) {
-        this.log('trace: refusal-fallback middleware not available here, continuing without it')
+        this.log('ask: refusal-fallback middleware not available here, continuing without it')
         this.client = this.transport.plainClient as unknown as StreamingClient
       } else {
         throw err
       }
       return this.stream(params)
     }
+  }
+}
+
+export interface TracerModels {
+  /** Writes traces for languages the app can't run. */
+  tutor: TutorTransport
+  /** Explains highlights, sets up Python runs, answers follow-ups. */
+  fast: TutorTransport
+}
+
+export class Tracer implements TracerLike {
+  private conv: Conversation | null = null
+  private code = ''
+
+  constructor(
+    private readonly models: TracerModels,
+    /** Runs Python highlights; null = Claude writes every trace. */
+    private readonly runner: PythonRunner | null,
+    private readonly log: (line: string) => void = () => {},
+    /** Force one effort level for Claude-written traces (tests, `npm run trace --effort`); undefined = pick by code size. */
+    private readonly effortOverride: Effort | undefined = envEffort()
+  ) {}
+
+  /** The conversation so far (for tests and scripts). */
+  get messages(): BetaMessageParam[] {
+    return this.conv?.messages ?? []
+  }
+
+  async ask(input: AskInput): Promise<TraceReply> {
+    this.code = normalizeSnippet(input.snippet)
+    const highlight = `The student highlighted this:\n${numberLines(this.code)}`
+    const images = input.image ? [input.image] : []
+
+    if (input.animate && this.runner && looksLikePython(this.code)) {
+      this.conv = new Conversation(this.models.fast, this.log)
+      const wire = await this.conv.request({ text: `[ANIMATE ON] [RUN]\n${highlight}`, images }, 'low')
+      const ran = await this.runPlan(wire)
+      if (ran) return ran
+      this.log('ask: the run did not work, Claude writes the trace instead')
+      return this.writtenTrace(highlight, images)
+    }
+    if (input.animate) return this.writtenTrace(highlight, images)
+
+    this.conv = new Conversation(this.models.fast, this.log)
+    return fromTraceWire(await this.conv.request({ text: `[ANIMATE OFF]\n${highlight}`, images }, 'medium'), this.code)
+  }
+
+  async followUp(text: string, animate: boolean): Promise<TraceReply> {
+    const conv = this.conv
+    if (!conv) throw new TutorError('Ask about a highlight first.', 'api')
+    if (animate && this.runner && looksLikePython(this.code)) {
+      const wire = await conv.request({ text: `[ANIMATE ON] [RUN] [FOLLOW-UP] ${text}` }, 'low')
+      const wantsRun = Boolean(wire.run.setup.trim() || wire.run.call.trim())
+      return (wantsRun && (await this.runPlan(wire))) || { message: wire.message.trim(), trace: null }
+    }
+    const effort = animate && conv.transport === this.models.tutor ? this.effortFor(this.code) : 'low'
+    return fromTraceWire(await conv.request({ text: `${animate ? '[ANIMATE ON]' : '[ANIMATE OFF]'} [FOLLOW-UP] ${text}` }, effort), this.code)
+  }
+
+  /** The tutor model writes the steps itself (any language, or when a run fails). */
+  private async writtenTrace(highlight: string, images: ImageInput[]): Promise<TraceReply> {
+    this.conv = new Conversation(this.models.tutor, this.log)
+    return fromTraceWire(await this.conv.request({ text: `[ANIMATE ON]\n${highlight}`, images }, this.effortFor(this.code)), this.code)
+  }
+
+  /** Run the code with the model's inputs. One retry with the error if it won't start; null if it still won't. */
+  private async runPlan(wire: TraceWireT, retries = 1): Promise<TraceReply | null> {
+    if (!this.runner || !this.conv || (wire.language && wire.language.toLowerCase() !== 'python')) return null
+    let why: string
+    try {
+      const run = await this.runner.trace(this.code, wire.run)
+      const trace = run.setupError ? null : toCodeTrace(run, this.code)
+      if (trace) {
+        const notes = [run.stopped && `stopped at the ${run.stopped} limit`, run.error].filter(Boolean).join(', ')
+        this.log(`run: ${trace.steps.length} steps${notes ? ` (${notes})` : ''}`)
+        return { message: wire.message.trim(), trace }
+      }
+      why = run.setupError || run.error || 'nothing in the highlighted code ran'
+    } catch (err) {
+      this.log(`run: ${(err as Error).message}`)
+      return null
+    }
+    this.log(`run: failed (${why})`)
+    if (retries <= 0) return null
+    return this.runPlan(await this.conv.request({ text: `[RUN FAILED] ${why}` }, 'low'), retries - 1)
+  }
+
+  private effortFor(code: string): Effort {
+    return this.effortOverride ?? traceEffort(code)
   }
 }
 

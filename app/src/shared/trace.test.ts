@@ -35,7 +35,8 @@ describe('fromTraceWire', () => {
       { line: 1, endLine: 1, focus: 'n = 5', kind: 'declare', result: '', reads: [], updates: [{ entity: 'n', value: value({ scalar: '5' }) }] },
       { line: 2, endLine: 0, focus: 'n > 0', kind: 'condition', result: 'true', reads: ['n', 'ghost'], updates: [] },
       { line: 99, endLine: 99, focus: 'not on the line', kind: 'assign', result: '', reads: [], updates: [{ entity: 'ghost', value: value() }] }
-    ]
+    ],
+    run: { setup: '', call: '' }
   }
 
   it('keeps steps on real lines and drops unknown entities', () => {

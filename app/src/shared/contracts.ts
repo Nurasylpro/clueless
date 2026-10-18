@@ -52,7 +52,6 @@ export interface ProblemInfo {
 export interface Recap {
   explainBack: string
   gaps: Gap[]
-  flashcards: { front: string; back: string }[]
   similarProblem: string | null
 }
 
@@ -102,6 +101,12 @@ export interface StageShow extends StagePlay {
   avoid: Rect | null
 }
 
+/** main -> stage window: the island's animation over a highlight (drawn while view.playback is set). */
+export interface StageIsland {
+  view: IslandView | null
+  avoid: Rect | null
+}
+
 export interface CheckResult {
   status: 'match' | 'mismatch' | 'missing_units' | 'wrong_units' | 'unparseable'
   detail: string
@@ -124,7 +129,6 @@ export interface RecapView extends Recap {
   attempts: number
   solved: boolean
   revealed: boolean
-  cardsAdded: number
   afterItemId: string // show the recap card right after this thread item
 }
 
@@ -191,23 +195,11 @@ export interface GapRecord {
   lastSeen: string
 }
 
-export interface CardView {
-  id: string
-  subject: Subject
-  topic: string
-  front: string
-  back: string
-  due: string
-}
 
 export interface MemoryView {
   gaps: GapRecord[]
-  dueCards: CardView[]
-  totalCards: number
   sessions: number
 }
-
-export type CardRating = 1 | 2 | 3 | 4 // again, hard, good, easy
 
 export interface Rect {
   x: number
@@ -241,11 +233,11 @@ export const IPC = {
   getStatus: 'app:get-status',
   getSession: 'session:get',
   getMemory: 'memory:get',
-  rateCard: 'memory:rate', // { id, rating } -> MemoryView
   // Code-mode animation: a click-through window over the student's code
   stagePlay: 'stage:play', // UI -> main: StagePlay
   stageStop: 'stage:stop', // UI -> main
   stageShow: 'stage:show', // main -> stage window: StageShow | null
+  stageIsland: 'stage:island', // main -> stage window: StageIsland
   // Voice: one recording ("utterance") at a time, identified by an id the UI makes up
   voiceToggle: 'voice:toggle', // main -> UI: the voice hotkey was pressed
   voiceStart: 'voice:start', // UI -> main: utterance id
@@ -305,7 +297,6 @@ export interface CluelessApi {
   quit(): void
   openScreenSettings(): void
   getMemory(): Promise<MemoryView>
-  rateCard(id: string, rating: CardRating): Promise<MemoryView>
   areaDone(rect: Rect): void
   areaCancel(): void
   // voice
@@ -321,52 +312,85 @@ export interface CluelessApi {
   playOnScreen(play: StagePlay): void
   stopOnScreen(): void
   onStage(cb: (show: StageShow | null) => void): () => void
+  onStageIsland(cb: (show: StageIsland) => void): () => void
 }
 
-// ---------- the island (the floating pill: highlight -> Ask -> text, then the animation) ----------
+// ---------- the island: highlight -> Ask -> text in the panel, the animation on the code itself ----------
 
-/** idle = just the pill · thinking / answer / reading = the pill with a text card under it ·
- *  playing = the full-screen animation. "reading" is the 4 s before an animation starts. */
-export type IslandPhase = 'idle' | 'thinking' | 'answer' | 'reading' | 'playing'
+/** idle = nothing asked · thinking = waiting for Claude · answer = the reply is in the panel. */
+export type IslandPhase = 'idle' | 'thinking' | 'answer'
 
 export interface IslandMessage {
   role: 'student' | 'clueless'
   text: string
 }
 
+/** Where the highlighted lines are on screen, in display coordinates (DIP). */
+export interface CodeSpot {
+  displayId: number
+  left: number
+  width: number
+  top: number // top of the first highlighted line
+  lineHeight: number // 0 = line positions unknown: only the variables card is drawn, at (left, top)
+  lines: number
+}
+
+/** The animation drawn over the student's code. */
+export interface IslandPlayback {
+  nonce: number // new on every (re)play
+  index: number // the step on screen; -1 = the short intro before step 1
+  playing: boolean // false = paused, or finished on the last step
+}
+
 export interface IslandView {
-  animate: boolean // the Animate On/Off toggle
+  askOnHighlight: boolean // the pill's switch: show Ask after a highlight
+  animate: boolean // the pill's switch: animate code answers
   phase: IslandPhase
   snippet: string | null // the highlighted text being discussed
   messages: IslandMessage[]
-  trace: CodeTrace | null // set while reading / playing
+  trace: CodeTrace | null // the latest reply's trace (kept for Replay)
+  spot: CodeSpot | null // where the highlight is on screen
+  playback: IslandPlayback | null // set while the animation is on screen
   busySince: number | null // when the current Claude call started
   error: string | null
+  notice: string | null // e.g. why the animation stopped
 }
 
 export const ISLAND_IPC = {
   view: 'island:view', // main -> UI: IslandView
   getView: 'island:get-view', // invoke
   setAnimate: 'island:animate', // boolean
+  setAskOnHighlight: 'island:ask-on-highlight', // boolean
   followUp: 'island:follow-up', // string
-  closeCard: 'island:close-card',
-  finish: 'island:finish', // the animation was clicked away
+  close: 'island:close', // close the Ask card (and the animation)
   hide: 'island:hide',
-  resize: 'island:resize', // { width, height } of the pill / card content
-  hold: 'island:hold', // boolean: the mouse is over the card (don't auto-close)
-  ask: 'island:ask' // the Ask button next to the cursor was clicked
+  resize: 'island:resize', // { width, height } of the pill
+  ask: 'island:ask', // the Ask button next to the cursor was clicked
+  play: 'island:play',
+  pause: 'island:pause',
+  step: 'island:step', // number: -1 back, +1 forward
+  replay: 'island:replay',
+  stop: 'island:stop', // take the animation off the screen
+  stepDone: 'island:step-done', // { nonce, index }: the panel finished reading this step aloud
+  narrated: 'island:narrated' // boolean: the panel reads steps aloud (voice on)
 } as const
 
-/** The API the preload script exposes as `window.island` (the island and the Ask button windows). */
+/** The API the preload script exposes as `window.island` (the pill, the Ask button, the panel's Ask card, the stage). */
 export interface IslandApi {
   getView(): Promise<IslandView>
   onView(cb: (view: IslandView) => void): () => void
   setAnimate(on: boolean): void
+  setAskOnHighlight(on: boolean): void
   followUp(text: string): void
-  closeCard(): void
-  finishAnimation(): void
+  close(): void
   hide(): void
   resize(size: { width: number; height: number }): void
-  holdCard(hold: boolean): void
   ask(): void
+  play(): void
+  pause(): void
+  step(delta: number): void
+  replay(): void
+  stop(): void
+  stepDone(nonce: number, index: number): void
+  setNarrated(on: boolean): void
 }

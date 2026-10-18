@@ -2,7 +2,7 @@
 import { useState } from 'react'
 import type { AppStatus, StuckState } from '../../../shared/contracts'
 import { api } from '../api'
-import { CardsIcon, CloseIcon, CropIcon, DropIcon, ExpandIcon, Logo, PowerIcon, ScanIcon, ShrinkIcon } from '../components/icons'
+import { CloseIcon, CropIcon, DropIcon, ExpandIcon, GapsIcon, Logo, PowerIcon, ScanIcon, ShrinkIcon } from '../components/icons'
 import { Button, cx, hotkeyLabel, IconButton, Kbd } from '../components/ui'
 
 export type Glass = 'glass' | 'clear' | 'solid'
@@ -11,20 +11,18 @@ const NEXT_GLASS: Record<Glass, Glass> = { glass: 'clear', clear: 'solid', solid
 
 export function Header({
   compact,
-  dueCards,
   stuck,
   glass,
   onGlass,
   onToggleCompact,
-  onOpenReview
+  onOpenGaps
 }: {
   compact: boolean
-  dueCards: number
   stuck: StuckState | null
   glass: Glass
   onGlass: (g: Glass) => void
   onToggleCompact: () => void
-  onOpenReview: () => void
+  onOpenGaps: () => void
 }) {
   return (
     <header className="drag flex h-10 shrink-0 items-center gap-2 border-b border-zinc-900/10 px-2.5 dark:border-white/10">
@@ -47,13 +45,8 @@ export function Header({
         <IconButton title={`Transparency: ${glass} (click to change)`} onClick={() => onGlass(NEXT_GLASS[glass])}>
           <DropIcon size={14} className={glass === 'solid' ? '' : glass === 'glass' ? 'opacity-70' : 'opacity-40'} />
         </IconButton>
-        <IconButton title="Flashcards and gap map" onClick={onOpenReview}>
-          <CardsIcon size={15} />
-          {dueCards > 0 && (
-            <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-claude-500 px-0.5 text-[9px] font-bold text-white">
-              {dueCards}
-            </span>
-          )}
+        <IconButton title="Your gaps" onClick={onOpenGaps}>
+          <GapsIcon size={15} />
         </IconButton>
         <IconButton title={compact ? 'Expand' : 'Shrink to a bar'} onClick={onToggleCompact}>
           {compact ? <ExpandIcon size={13} /> : <ShrinkIcon size={15} />}

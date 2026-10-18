@@ -3,8 +3,6 @@
 // the "Stuck?" bubble right away.
 import type {
   AppStatus,
-  CardRating,
-  CardView,
   CluelessApi,
   MemoryView,
   SessionView,
@@ -24,11 +22,6 @@ export function createMockApi(): CluelessApi {
   const voiceStates = new Set<(e: VoiceStateEvent) => void>()
   const stageListeners = new Set<(s: StageShow | null) => void>()
   const showStage = (show: StageShow | null): void => stageListeners.forEach((cb) => cb(show))
-  let cards: CardView[] = [
-    { id: 'c1', subject: 'math', topic: 'integration by parts', front: 'What is the integration by parts formula?', back: '$\\int u\\,dv = uv - \\int v\\,du$', due: new Date().toISOString() },
-    { id: 'c2', subject: 'coding', topic: 'Valid Sudoku', front: 'Python: make a list of 9 empty sets', back: '`[set() for _ in range(9)]`', due: new Date().toISOString() }
-  ]
-
   const status: AppStatus = {
     platform: navigator.platform.toLowerCase().includes('mac') ? 'darwin' : 'win32',
     provider: 'bedrock',
@@ -46,7 +39,7 @@ export function createMockApi(): CluelessApi {
     listeners.forEach((cb) => cb(snapshot))
   }
 
-  const memory = (): MemoryView => ({ gaps: MOCK_GAPS, dueCards: cards, totalCards: cards.length + 3, sessions: 4 })
+  const memory = (): MemoryView => ({ gaps: MOCK_GAPS, sessions: 4 })
 
   const pushTutor = (turn: TurnView): void => {
     if (!view) return
@@ -150,7 +143,6 @@ export function createMockApi(): CluelessApi {
             attempts: view.attempts,
             solved: view.solved,
             revealed: view.revealed,
-            cardsAdded: MOCK_RECAP.flashcards.length,
             afterItemId: last.id
           }
         })
@@ -180,10 +172,6 @@ export function createMockApi(): CluelessApi {
     quit: () => console.log('[mock] quit'),
     openScreenSettings: () => {},
     getMemory: async () => memory(),
-    rateCard: async (id: string, _rating: CardRating) => {
-      cards = cards.filter((c) => c.id !== id)
-      return memory()
-    },
     areaDone: (rect) => console.log('[mock] area', rect),
     areaCancel: () => console.log('[mock] area cancelled'),
     // Voice needs the desktop app (Deepgram runs in the main process): report that instead.
@@ -212,6 +200,8 @@ export function createMockApi(): CluelessApi {
     onStage: (cb) => {
       stageListeners.add(cb)
       return () => stageListeners.delete(cb)
-    }
+    },
+    // The island demo (?island) draws its runs in its own page.
+    onStageIsland: () => () => {}
   }
 }

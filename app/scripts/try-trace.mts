@@ -1,20 +1,24 @@
-// Try "Ask" on highlighted code in the terminal, without Electron: Claude traces the file step by
-// step, exactly what the full-screen animation plays. Good for checking a demo snippet first.
+// Try "Ask" on highlighted code in the terminal, without Electron: the same steps the animation
+// plays. Python is run for real (Haiku sets up the run); other languages are traced by Claude.
+// Good for checking a demo snippet first.
 //
-//   npm run trace -- path/to/code.py           Animate on (max effort, full trace)
+//   npm run trace -- path/to/code.py           Animate on
 //   npm run trace -- path/to/code.py --off     Animate off (text only)
 //   npm run trace -- path/to/code.py --json    print the whole trace as JSON
-//   npm run trace -- path/to/code.py --effort medium   force an effort (low|medium|high|xhigh|max)
+//   npm run trace -- path/to/code.py --effort medium   force an effort for Claude-written traces
+//   npm run trace -- path/to/code.py --no-run  Claude writes the trace even for Python
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { CodeTrace, EntityValue } from '../src/shared/trace'
 import { loadEnvFiles } from '../src/main/env'
 import { Tracer, traceEffort, type Effort } from '../src/main/island/tracer'
+import { PythonRunner } from '../src/main/run/python'
 import { createTransport } from '../src/main/tutor/provider'
 
 loadEnvFiles([join(process.cwd(), '.env')])
-const transport = createTransport()
-if (!transport) {
+const transport = createTransport(process.env, 'tutor')
+const fast = createTransport(process.env, 'fast')
+if (!transport || !fast) {
   console.error('No Claude credentials. Copy .env.example to .env and fill in the Bedrock (AWS) or ANTHROPIC_API_KEY lines.')
   process.exit(1)
 }
@@ -32,9 +36,10 @@ const snippet = readFileSync(file, 'utf8')
 
 const shownEffort = effort ?? traceEffort(snippet)
 console.log(
-  `${transport.provider === 'bedrock' ? `Amazon Bedrock (${transport.region})` : 'Claude API'} · ${transport.model} · ${animate ? `Animate on, ${shownEffort} effort` : 'Animate off'}`
+  `${transport.provider === 'bedrock' ? `Amazon Bedrock (${transport.region})` : 'Claude API'} · ${fast.model} + ${transport.model} · ${animate ? `Animate on (${shownEffort} effort if Claude writes the trace)` : 'Animate off'}`
 )
-const tracer = new Tracer(transport, (line) => console.log(`  (${line})`), effort)
+const runner = args.includes('--no-run') ? null : new PythonRunner(join(process.cwd(), 'node_modules', 'pyodide'))
+const tracer = new Tracer({ tutor: transport, fast }, runner, (line: string) => console.log(`  (${line})`), effort)
 try {
   const reply = await tracer.ask({ snippet, image: null, animate })
   console.log(`\n${reply.message}\n`)
@@ -46,8 +51,9 @@ try {
   }
 } catch (err) {
   console.error(`error: ${(err as Error).message}`)
-  process.exit(1)
+  process.exitCode = 1
 }
+runner?.dispose()
 
 function printTrace(trace: CodeTrace): void {
   const lines = trace.code.split('\n')

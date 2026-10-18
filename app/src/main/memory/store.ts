@@ -1,13 +1,10 @@
-// Memory: gaps, flashcards and past sessions, kept in one JSON file on the laptop.
+// Memory: gaps and past sessions, kept in one JSON file on the laptop.
 // A JSON file instead of SQLite: no native modules, so it installs the same way on macOS
 // and Windows. The data is small.
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { createEmptyCard, fsrs, type Card, type Grade } from 'ts-fsrs'
 import type {
-  CardRating,
-  CardView,
   Gap,
   GapRecord,
   InputKind,
@@ -31,31 +28,18 @@ export interface SessionRecord {
   turns: { role: 'tutor' | 'student'; text: string; kind?: TurnKind; hintLevel?: number; as?: InputKind }[]
 }
 
-interface CardRecord {
-  id: string
-  subject: Subject
-  topic: string
-  front: string
-  back: string
-  createdAt: string
-  fsrs: Card
-}
-
 interface MemoryData {
   version: 1
   gaps: GapRecord[]
-  cards: CardRecord[]
   sessions: SessionRecord[]
 }
-
-const scheduler = fsrs()
 
 export function topicKey(topic: string): string {
   return topic.toLowerCase().replace(/\s+/g, ' ').trim()
 }
 
 export class MemoryStore {
-  private data: MemoryData = { version: 1, gaps: [], cards: [], sessions: [] }
+  private data: MemoryData = { version: 1, gaps: [], sessions: [] }
 
   constructor(private readonly file: string | null) {
     this.load()
@@ -64,10 +48,10 @@ export class MemoryStore {
   private load(): void {
     if (!this.file) return
     try {
-      const raw = JSON.parse(readFileSync(this.file, 'utf8')) as MemoryData
+      const raw = JSON.parse(readFileSync(this.file, 'utf8')) as MemoryData & { cards?: unknown }
       if (raw.version !== 1) return
-      raw.cards = raw.cards.map((c) => ({ ...c, fsrs: reviveCard(c.fsrs) }))
-      this.data = raw
+      // Files from before flashcards were removed still have a "cards" list: drop it.
+      this.data = { version: 1, gaps: raw.gaps ?? [], sessions: raw.sessions ?? [] }
     } catch {
       // No file yet (first run) or unreadable: start fresh.
     }
@@ -113,55 +97,15 @@ export class MemoryStore {
     return repeats.map((g) => `${g.topic} (${g.type}, ${g.timesSeen}x)`).join('; ')
   }
 
-  addCards(subject: Subject, topic: string, cards: { front: string; back: string }[], now = new Date()): number {
-    let added = 0
-    for (const c of cards) {
-      if (this.data.cards.some((x) => x.front.trim() === c.front.trim())) continue
-      this.data.cards.push({
-        id: randomUUID(),
-        subject,
-        topic,
-        front: c.front,
-        back: c.back,
-        createdAt: now.toISOString(),
-        fsrs: createEmptyCard(now)
-      })
-      added++
-    }
-    if (added) this.save()
-    return added
-  }
-
-  rate(cardId: string, rating: CardRating, now = new Date()): void {
-    const card = this.data.cards.find((c) => c.id === cardId)
-    if (!card) return
-    card.fsrs = scheduler.next(card.fsrs, now, rating as Grade).card
-    this.save()
-  }
-
   addSession(rec: SessionRecord): void {
     this.data.sessions.push(rec)
     this.save()
   }
 
-  view(now = new Date()): MemoryView {
-    const due: CardView[] = this.data.cards
-      .filter((c) => c.fsrs.due.getTime() <= now.getTime())
-      .sort((a, b) => a.fsrs.due.getTime() - b.fsrs.due.getTime())
-      .map((c) => ({ id: c.id, subject: c.subject, topic: c.topic, front: c.front, back: c.back, due: c.fsrs.due.toISOString() }))
+  view(): MemoryView {
     return {
       gaps: [...this.data.gaps].sort((a, b) => b.timesSeen - a.timesSeen || b.lastSeen.localeCompare(a.lastSeen)),
-      dueCards: due,
-      totalCards: this.data.cards.length,
       sessions: this.data.sessions.length
     }
-  }
-}
-
-function reviveCard(c: Card): Card {
-  return {
-    ...c,
-    due: new Date(c.due),
-    last_review: c.last_review ? new Date(c.last_review) : undefined
   }
 }

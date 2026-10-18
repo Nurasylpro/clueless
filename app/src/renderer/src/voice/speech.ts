@@ -12,8 +12,9 @@ export interface SpeechSnapshot {
 
 export interface SpeechService {
   readonly available: boolean
-  /** Say `text` (already plain words, see toSpeech). Stops anything that was playing. */
-  speak(text: string): void
+  /** Say `text` (already plain words, see toSpeech). Stops anything that was playing.
+   *  `onDone` runs when it has been said to the end (not when it's stopped or replaced). */
+  speak(text: string, onDone?: () => void): void
   pause(): void
   resume(): void
   stop(): void
@@ -84,14 +85,15 @@ export function createBrowserSpeech(
     if (snap.state !== 'idle') set({ state: 'idle' })
   }
 
-  const speak = (text: string): void => {
+  const speak = (text: string, onDone?: () => void): void => {
     stop()
     if (!synth || !Utterance) {
       set({ error: "Spoken replies aren't available on this computer." })
+      onDone?.()
       return
     }
     const chunks = speechChunks(text)
-    if (chunks.length === 0) return
+    if (chunks.length === 0) return onDone?.()
     const gen = generation
     set({ state: 'speaking', error: null })
 
@@ -104,6 +106,7 @@ export function createBrowserSpeech(
         if (i >= chunks.length) {
           stopPoll()
           set({ state: 'idle' })
+          onDone?.()
           return
         }
         const u = new Utterance(chunks[i])
@@ -123,6 +126,7 @@ export function createBrowserSpeech(
           if (e.error === 'interrupted' || e.error === 'canceled') return
           stopPoll()
           set({ state: 'idle', error: "Couldn't play the reply aloud. The text is still on screen." })
+          onDone?.()
         }
         try {
           synth.speak(u)
@@ -234,10 +238,10 @@ export function createCloudSpeech(
     if (snap.state !== 'idle') set({ state: 'idle' })
   }
 
-  const speak = (text: string): void => {
+  const speak = (text: string, onDone?: () => void): void => {
     stop()
     const chunks = speechChunks(text, 400)
-    if (chunks.length === 0) return
+    if (chunks.length === 0) return onDone?.()
     const gen = generation
     notice = null
     set({ state: 'speaking', error: null })
@@ -259,7 +263,7 @@ export function createCloudSpeech(
       clearAudio()
       notice = !why.ok && why.reason === 'error' ? `Used the built-in voice: ${why.message}` : null
       onFallback = true
-      fallback.speak(chunks.slice(i).join(' '))
+      fallback.speak(chunks.slice(i).join(' '), onDone)
     }
 
     const play = async (i: number): Promise<void> => {
@@ -267,6 +271,7 @@ export function createCloudSpeech(
       if (i >= chunks.length) {
         clearAudio()
         set({ state: 'idle' })
+        onDone?.()
         return
       }
       const res = await fetchChunk(i)
