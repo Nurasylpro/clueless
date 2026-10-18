@@ -33,23 +33,25 @@ import { MicButton, SpeakingStrip, VoiceStrip } from '../components/MicButton'
 import { Button, cx, IconButton } from '../components/ui'
 import { VisualSlot } from '../components/VisualSlot'
 import { speech } from '../voice/speaker'
-import { useVoiceConversation, type VoiceConversation } from '../voice/useVoiceConversation'
+import type { VoiceConversation } from '../voice/useVoiceConversation'
 
-type ComposerMode = 'answer' | 'recall'
+export type ComposerMode = 'answer' | 'recall'
 
-export function SessionScreen({ session, onOpenReview }: { session: SessionView; onOpenReview: () => void }) {
-  const [mode, setMode] = useState<ComposerMode>('answer')
+/** Voice (`conv`) and the answer box's mode live in the app, so the compact pill can talk too. */
+export function SessionScreen({
+  session,
+  onOpenReview,
+  conv,
+  mode,
+  setMode
+}: {
+  session: SessionView
+  onOpenReview: () => void
+  conv: VoiceConversation
+  mode: ComposerMode
+  setMode: (m: ComposerMode) => void
+}) {
   const ready = Boolean(session.problem) && !session.busy
-  // Voice: what you say is sent exactly like a typed answer (spoken math goes as text, so the checker
-  // and the tutor read it like a typed sentence); new replies are read aloud in voice mode.
-  const conv = useVoiceConversation({
-    session,
-    disabled: !ready,
-    onSpoken: (text) => {
-      api.send({ text, as: mode === 'recall' ? 'recall' : 'text' })
-      setMode('answer')
-    }
-  })
 
   return (
     <div className="session-screen flex min-h-0 flex-col">

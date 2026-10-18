@@ -7,6 +7,8 @@ import type { Rect, WindowMode } from '../../shared/contracts'
 export const PANEL_WIDTH = 416
 /** Explain mode ('wide'): the animation pane sits next to the conversation. */
 export const WIDE_WIDTH = 860
+/** Compact ('compact'): just the pill bar (logo, name, mic, expand, hide), plus the margin. */
+export const PILL_WIDTH = 252 + 16
 const MIN_WIDTH = 320
 const MAX_WIDTH = 960
 const MARGIN = 16
@@ -74,28 +76,35 @@ export function fitPanelHeight(win: BrowserWindow, panelHeight: number): void {
 }
 
 /** The student dragged a side edge. `anchor` is the edge that stays put; the window stays on screen. */
-export function resizePanelWidth(win: BrowserWindow, width: number, anchor: 'left' | 'right'): void {
+export function resizePanelWidth(win: BrowserWindow, width: number, anchor: 'left' | 'right', min = MIN_WIDTH): void {
   if (!Number.isFinite(width)) return
   const b = win.getBounds()
   const work = screen.getDisplayNearestPoint({ x: b.x, y: b.y }).workArea
-  const w = Math.round(Math.max(MIN_WIDTH, Math.min(width, MAX_WIDTH, work.width - 16)))
+  const w = Math.round(Math.max(min, Math.min(width, MAX_WIDTH, work.width - 16)))
   if (w === b.width) return
   const x = anchor === 'right' ? b.x + b.width - w : b.x
   win.setBounds({ x: Math.max(work.x, Math.min(x, work.x + work.width - w)), y: b.y, width: w, height: b.height })
 }
 
-/** Width before going wide, so leaving explain mode gives the student their own width back. */
-const widthBeforeWide = new WeakMap<BrowserWindow, number>()
+/** The student's own width, kept while the panel is wide or a pill, and given back after. */
+const widthBefore = new WeakMap<BrowserWindow, number>()
 
-/** 'wide' widens the panel to the left for the animation pane; the height keeps following the panel. */
+/**
+ * 'wide' widens the panel to the left for the animation pane; 'compact' shrinks it to the pill
+ * (keeping its right edge); 'expanded' gives the student's width back. The height keeps
+ * following the panel.
+ */
 export function setPanelMode(win: BrowserWindow, mode: WindowMode): void {
   const { width } = win.getBounds()
   if (mode === 'wide') {
-    if (width < WIDE_WIDTH) widthBeforeWide.set(win, width)
+    if (!widthBefore.has(win) && width < WIDE_WIDTH) widthBefore.set(win, width)
     resizePanelWidth(win, Math.max(width, WIDE_WIDTH), 'right')
-  } else if (widthBeforeWide.has(win)) {
-    resizePanelWidth(win, widthBeforeWide.get(win) ?? PANEL_WIDTH, 'right')
-    widthBeforeWide.delete(win)
+  } else if (mode === 'compact') {
+    if (!widthBefore.has(win)) widthBefore.set(win, width)
+    resizePanelWidth(win, PILL_WIDTH, 'right', PILL_WIDTH)
+  } else if (widthBefore.has(win)) {
+    resizePanelWidth(win, widthBefore.get(win) ?? PANEL_WIDTH, 'right')
+    widthBefore.delete(win)
   }
 }
 

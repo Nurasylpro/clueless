@@ -6,9 +6,11 @@ import { mock as islandMock } from './island/api'
 import { AskButton, IslandScreen } from './island/IslandScreen'
 import { MockPage } from './island/MockPage'
 import { AreaSelector } from './screens/AreaSelector'
-import { Banners, EmptyState, GLASS_ALPHA, Header, type Glass } from './screens/Home'
+import { Banners, CompactBar, EmptyState, GLASS_ALPHA, Header, type Glass } from './screens/Home'
 import { ReviewScreen } from './screens/Review'
-import { SessionScreen } from './screens/Session'
+import { SessionScreen, type ComposerMode } from './screens/Session'
+import { VoiceStrip } from './components/MicButton'
+import { useVoiceConversation } from './voice/useVoiceConversation'
 import { AnimationPane } from './visuals/AnimationPane'
 import { CodeOverlay, StageScreen } from './visuals/CodeOverlay'
 import { PlaybackContext, playsOnCode, type Playback, type Playing } from './visuals/playback'
@@ -56,6 +58,7 @@ function Overlay() {
   const [screen, setScreen] = useState<'main' | 'review'>('main')
   const [compact, setCompact] = useState(false)
   const [dueCards, setDueCards] = useState(0)
+  const [totalCards, setTotalCards] = useState(0)
   const [glass, setGlass] = useState<Glass>(loadGlass)
   const [size, setSize] = useState<PanelSize>(loadSize)
   const [playing, setPlaying] = useState<Playing | null>(null)
@@ -65,7 +68,10 @@ function Overlay() {
     if (isMock) document.body.classList.add('mock-desktop')
     void api.getStatus().then(setStatus)
     void api.getSession().then(setSession)
-    void api.getMemory().then((m) => setDueCards(m.dueCards.length))
+    void api.getMemory().then((m) => {
+      setDueCards(m.dueCards.length)
+      setTotalCards(m.totalCards)
+    })
     const offSession = api.onSession(setSession)
     const offStatus = api.onStatus(setStatus)
     // Browser mock mode has no stage window: draw code-mode animations in this page instead.
@@ -116,21 +122,46 @@ function Overlay() {
     stopPlayback.current()
     if (!session?.id) return
     setScreen('main')
-    setCompact(false)
-  }, [session?.id])
+    setCompactMode(false)
+    setMode('answer')
+  }, [session?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // New flashcards after a recap.
   useEffect(() => {
-    if (session?.recap) void api.getMemory().then((m) => setDueCards(m.dueCards.length))
+    if (session?.recap) void api.getMemory().then((m) => {
+      setDueCards(m.dueCards.length)
+      setTotalCards(m.totalCards)
+    })
   }, [session?.recap])
 
-  const toggleCompact = (): void => {
-    const next = !compact
+  // The panel and its window always change size together (the pill has a smaller window).
+  const setCompactMode = (next: boolean): void => {
     setCompact(next)
     api.setWindowMode(windowMode(next, playing))
   }
+  const toggleCompact = (): void => setCompactMode(!compact)
 
-  const onMemory = useCallback((m: MemoryView) => setDueCards(m.dueCards.length), [])
+  // Voice lives here, not in the session screen, so the compact pill can talk too.
+  // What you say is sent exactly like a typed answer; with no problem yet, it becomes the problem.
+  const [mode, setMode] = useState<ComposerMode>('answer')
+  const conv = useVoiceConversation({
+    session,
+    disabled: Boolean(session?.busy),
+    onSpoken: (text) => {
+      if (session?.problem) {
+        api.send({ text, as: mode === 'recall' ? 'recall' : 'text' })
+        setMode('answer')
+      } else {
+        api.askText(text)
+      }
+      if (compact) setCompactMode(false) // open the panel to show the reply
+    }
+  })
+
+  const onMemory = useCallback((m: MemoryView) => {
+    setDueCards(m.dueCards.length)
+    setTotalCards(m.totalCards)
+  }, [])
 
   // The window is exactly as tall as the panel: small when there's little to show.
   const panel = useRef<HTMLDivElement>(null)
@@ -185,11 +216,12 @@ function Overlay() {
         className={
           // overflow-clip, not overflow-hidden: a hidden box can still be scrolled (focusing the
           // answer box did that), which pushed the header out of the top of a short panel.
-          'glass-panel relative flex flex-col overflow-clip rounded-2xl text-zinc-900 shadow-xl dark:text-zinc-100 ' +
+          'glass-panel relative flex flex-col overflow-clip text-zinc-900 shadow-xl dark:text-zinc-100 ' +
+          (compact ? 'rounded-[26px] ' : 'rounded-2xl ') +
           (glass === 'clear' ? 'glass-clear ' : '') +
           // Code mode: the panel turns see-through so the animation on the code is the focus.
           (onCode ? 'opacity-40 transition-opacity duration-300 hover:opacity-100 ' : '') +
-          (isMock ? (explain && !compact ? 'w-[844px]' : 'w-[400px]') : 'w-full')
+          (isMock ? (compact ? 'w-[252px]' : explain ? 'w-[844px]' : 'w-[400px]') : 'w-full')
         }
         style={
           {
@@ -200,18 +232,26 @@ function Overlay() {
           } as React.CSSProperties
         }
       >
-        <Header
-          compact={compact}
-          dueCards={dueCards}
-          stuck={session?.stuck ?? null}
-          glass={glass}
-          onGlass={changeGlass}
-          onToggleCompact={toggleCompact}
-          onOpenReview={() => {
-            if (compact) toggleCompact()
-            setScreen('review')
-          }}
-        />
+        {compact ? (
+          <>
+            <CompactBar conv={conv} busy={Boolean(session?.busy)} onExpand={toggleCompact} />
+            {/* Talking from the pill: your words appear right under it. */}
+            <div className="px-2 empty:hidden">
+              <VoiceStrip voice={conv.input} onDismiss={conv.input.cancel} />
+            </div>
+          </>
+        ) : (
+          <Header
+            compact={compact}
+            dueCards={dueCards}
+            totalCards={totalCards}
+            stuck={session?.stuck ?? null}
+            glass={glass}
+            onGlass={changeGlass}
+            onToggleCompact={toggleCompact}
+            onOpenReview={() => setScreen('review')}
+          />
+        )}
         {!compact && (
           <>
             <Banners status={status} />
@@ -222,7 +262,13 @@ function Overlay() {
                 {screen === 'review' ? (
                   <ReviewScreen onBack={() => setScreen('main')} onChange={onMemory} />
                 ) : session ? (
-                  <SessionScreen session={session} onOpenReview={() => setScreen('review')} />
+                  <SessionScreen
+                    session={session}
+                    onOpenReview={() => setScreen('review')}
+                    conv={conv}
+                    mode={mode}
+                    setMode={setMode}
+                  />
                 ) : (
                   <EmptyState status={status} />
                 )}

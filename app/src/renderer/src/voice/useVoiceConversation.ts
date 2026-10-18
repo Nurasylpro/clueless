@@ -41,8 +41,8 @@ export function useVoiceConversation({
   disabled,
   onSpoken
 }: {
-  session: SessionView
-  disabled: boolean // the tutor is busy or there's no problem yet
+  session: SessionView | null // null: nothing started yet (what you say becomes the problem)
+  disabled: boolean // the tutor is busy
   onSpoken: (text: string) => void
 }): VoiceConversation {
   const [enabled, setEnabledState] = useState(loadEnabled)
@@ -132,7 +132,8 @@ export function useVoiceConversation({
   return { enabled, setEnabled, input, speech: snap, processing, talk, toggleMic, readAloud }
 }
 
-function findLastTutor(session: SessionView): { id: string; message: string } | null {
+function findLastTutor(session: SessionView | null): { id: string; message: string } | null {
+  if (!session) return null
   for (let i = session.thread.length - 1; i >= 0; i--) {
     const item = session.thread[i]
     if (item.role === 'tutor') return { id: item.id, message: item.turn.message }
