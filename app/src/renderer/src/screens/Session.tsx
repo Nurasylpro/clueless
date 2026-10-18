@@ -282,7 +282,8 @@ function TutorCard({ itemId, turn, onReadAloud }: { itemId: string; turn: TurnVi
       <IconButton
         title="Read aloud"
         onClick={onReadAloud}
-        className="absolute right-1 top-1 h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+        // !absolute: IconButton's own `relative` would otherwise win and put it on a line of its own.
+        className="!absolute bottom-1 right-1 h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
       >
         <SpeakerIcon size={13} />
       </IconButton>
