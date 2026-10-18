@@ -42,10 +42,12 @@ export const CropIcon = (p: IconProps) => (
     <path d="M18 22V8a2 2 0 0 0-2-2H2" />
   </Icon>
 )
-export const CardsIcon = (p: IconProps) => (
+export const GapsIcon = (p: IconProps) => (
   <Icon {...p}>
-    <rect x="3" y="7" width="14" height="14" rx="2" />
-    <path d="M7 3h12a2 2 0 0 1 2 2v12" />
+    <path d="M4 20h16" />
+    <path d="M7 16v-5" />
+    <path d="M12 16V6" />
+    <path d="M17 16v-8" />
   </Icon>
 )
 export const ShrinkIcon = (p: IconProps) => (

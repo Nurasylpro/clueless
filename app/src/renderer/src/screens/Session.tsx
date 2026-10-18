@@ -37,7 +37,7 @@ import { useVoiceConversation, type VoiceConversation } from '../voice/useVoiceC
 
 type ComposerMode = 'answer' | 'recall'
 
-export function SessionScreen({ session, onOpenReview }: { session: SessionView; onOpenReview: () => void }) {
+export function SessionScreen({ session, onOpenGaps }: { session: SessionView; onOpenGaps: () => void }) {
   const [mode, setMode] = useState<ComposerMode>('answer')
   const ready = Boolean(session.problem) && !session.busy
   // Voice: what you say is sent exactly like a typed answer (spoken math goes as text, so the checker
@@ -55,7 +55,7 @@ export function SessionScreen({ session, onOpenReview }: { session: SessionView;
     <div className="session-screen flex min-h-0 flex-col">
       {session.problem && <ProblemBar problem={session.problem} />}
       {session.plan.length > 0 && <PlanList plan={session.plan} disabled={!ready || Boolean(session.recap)} />}
-      <LatestExchange session={session} onOpenReview={onOpenReview} onReadAloud={conv.readAloud} />
+      <LatestExchange session={session} onOpenGaps={onOpenGaps} onReadAloud={conv.readAloud} />
       {session.stuck.level === 2 && !session.busy && !session.recap && (
         <StuckBubble reason={session.stuck.reason} onRecall={() => setMode('recall')} />
       )}
@@ -189,11 +189,11 @@ function findLastIndex<T>(list: T[], test: (item: T) => boolean): number {
 /** Only the student's latest input and Clueless's latest reply. */
 function LatestExchange({
   session,
-  onOpenReview,
+  onOpenGaps,
   onReadAloud
 }: {
   session: SessionView
-  onOpenReview: () => void
+  onOpenGaps: () => void
   onReadAloud: (markdown: string) => void
 }) {
   const { thread } = session
@@ -213,7 +213,7 @@ function LatestExchange({
         <div className={cx('transition-opacity', session.busy && 'opacity-40')}>
           <TutorCard itemId={tutor.id} turn={tutor.turn} onReadAloud={() => onReadAloud(tutor.turn.message)} />
           {session.recap && session.recap.afterItemId === tutor.id && (
-            <RecapCard recap={session.recap} onOpenReview={onOpenReview} />
+            <RecapCard recap={session.recap} onOpenGaps={onOpenGaps} />
           )}
         </div>
       )}
@@ -337,7 +337,7 @@ function BusyRow({ label }: { label: string }) {
   )
 }
 
-function RecapCard({ recap, onOpenReview }: { recap: RecapView; onOpenReview: () => void }) {
+function RecapCard({ recap, onOpenGaps }: { recap: RecapView; onOpenGaps: () => void }) {
   return (
     <div className="mt-2 rounded-xl border border-claude-400/70 bg-claude-50/60 p-3 text-[12.5px] text-zinc-800 dark:border-claude-600/30 dark:bg-claude-600/5 dark:text-zinc-100">
       <div className="mb-2 flex items-center gap-2">
@@ -366,9 +366,9 @@ function RecapCard({ recap, onOpenReview }: { recap: RecapView; onOpenReview: ()
         </div>
       )}
       <div className="flex flex-wrap items-center gap-2 pt-1">
-        {recap.cardsAdded > 0 && (
-          <Button variant="chip" onClick={onOpenReview}>
-            {recap.cardsAdded} new flashcard{recap.cardsAdded === 1 ? '' : 's'}
+        {recap.gaps.length > 0 && (
+          <Button variant="chip" onClick={onOpenGaps}>
+            See all your gaps
           </Button>
         )}
         {recap.similarProblem && (

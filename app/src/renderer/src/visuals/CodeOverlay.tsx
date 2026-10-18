@@ -3,8 +3,9 @@
 // structure next to them, and draws an arrow from the lines to it. Plays once, then freezes.
 import { motion } from 'motion/react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { StageShow } from '../../../shared/contracts'
+import type { StageIsland, StageShow } from '../../../shared/contracts'
 import { api } from '../api'
+import { TraceStage } from '../island/TraceStage'
 import { FrameDots } from './AnimationPane'
 import { arrowPath, placeCard } from './layout'
 import { SceneView } from './SceneView'
@@ -13,11 +14,18 @@ import { useFramePlayer } from './useFramePlayer'
 const SPRING = { type: 'spring', stiffness: 260, damping: 30 } as const
 const clamp01 = (v: number): number => Math.max(0, Math.min(1, v))
 
-/** The stage window's whole page (#stage). Shows whatever the main process sends. */
+/** The stage window's whole page (#stage): the tutor's visual over the code, or Ask's step-by-step run. */
 export function StageScreen() {
   const [show, setShow] = useState<StageShow | null>(null)
+  const [island, setIsland] = useState<StageIsland | null>(null)
   useEffect(() => api.onStage(setShow), [])
-  return show ? <CodeOverlay show={show} /> : null
+  useEffect(() => api.onStageIsland(setIsland), [])
+  return (
+    <>
+      {show && <CodeOverlay show={show} />}
+      {island?.view && <TraceStage view={island.view} avoid={island.avoid} />}
+    </>
+  )
 }
 
 export function CodeOverlay({ show }: { show: StageShow }) {

@@ -26,7 +26,6 @@ const api: CluelessApi = {
   quit: () => ipcRenderer.send(IPC.quit),
   openScreenSettings: () => ipcRenderer.send(IPC.openScreenSettings),
   getMemory: () => ipcRenderer.invoke(IPC.getMemory),
-  rateCard: (id, rating) => ipcRenderer.invoke(IPC.rateCard, { id, rating }),
   areaDone: (rect) => ipcRenderer.send(IPC.areaDone, rect),
   areaCancel: () => ipcRenderer.send(IPC.areaCancel),
   micAccess: () => ipcRenderer.invoke(IPC.voiceMicAccess),
@@ -40,23 +39,30 @@ const api: CluelessApi = {
   tts: (req) => ipcRenderer.invoke(IPC.voiceTts, req),
   playOnScreen: (play) => ipcRenderer.send(IPC.stagePlay, play),
   stopOnScreen: () => ipcRenderer.send(IPC.stageStop),
-  onStage: (cb) => listen(IPC.stageShow, cb)
+  onStage: (cb) => listen(IPC.stageShow, cb),
+  onStageIsland: (cb) => listen(IPC.stageIsland, cb)
 }
 
 contextBridge.exposeInMainWorld('clueless', api)
 
-// The island and the Ask button.
+// The island: the pill, the Ask button, and the panel's Ask card.
 const island: IslandApi = {
   getView: () => ipcRenderer.invoke(ISLAND_IPC.getView),
   onView: (cb) => listen(ISLAND_IPC.view, cb),
   setAnimate: (on) => ipcRenderer.send(ISLAND_IPC.setAnimate, on),
+  setAskOnHighlight: (on) => ipcRenderer.send(ISLAND_IPC.setAskOnHighlight, on),
   followUp: (text) => ipcRenderer.send(ISLAND_IPC.followUp, text),
-  closeCard: () => ipcRenderer.send(ISLAND_IPC.closeCard),
-  finishAnimation: () => ipcRenderer.send(ISLAND_IPC.finish),
+  close: () => ipcRenderer.send(ISLAND_IPC.close),
   hide: () => ipcRenderer.send(ISLAND_IPC.hide),
   resize: (size) => ipcRenderer.send(ISLAND_IPC.resize, size),
-  holdCard: (hold) => ipcRenderer.send(ISLAND_IPC.hold, hold),
-  ask: () => ipcRenderer.send(ISLAND_IPC.ask)
+  ask: () => ipcRenderer.send(ISLAND_IPC.ask),
+  play: () => ipcRenderer.send(ISLAND_IPC.play),
+  pause: () => ipcRenderer.send(ISLAND_IPC.pause),
+  step: (delta) => ipcRenderer.send(ISLAND_IPC.step, delta),
+  replay: () => ipcRenderer.send(ISLAND_IPC.replay),
+  stop: () => ipcRenderer.send(ISLAND_IPC.stop),
+  stepDone: (nonce, index) => ipcRenderer.send(ISLAND_IPC.stepDone, { nonce, index }),
+  setNarrated: (on) => ipcRenderer.send(ISLAND_IPC.narrated, on)
 }
 
 contextBridge.exposeInMainWorld('island', island)

@@ -231,11 +231,18 @@ describe('provider detection', () => {
   it('uses anthropic.-prefixed model IDs and a region on Bedrock', () => {
     expect(providerInfo({ AWS_BEARER_TOKEN_BEDROCK: 'x', AWS_REGION: 'us-west-2' })).toEqual({
       provider: 'bedrock',
-      model: 'anthropic.claude-opus-5-5',
+      model: 'anthropic.claude-sonnet-5-5',
+      fastModel: 'anthropic.claude-haiku-5-5',
       region: 'us-west-2'
     })
-    expect(providerInfo({ ANTHROPIC_API_KEY: 'sk' })?.model).toBe('claude-opus-5-5')
-    expect(providerInfo({ AWS_PROFILE: 'p', CLUELESS_MODEL: 'anthropic.claude-sonnet-5' })?.model).toBe('anthropic.claude-sonnet-5')
+    expect(providerInfo({ ANTHROPIC_API_KEY: 'sk' })?.model).toBe('claude-sonnet-5-5')
+    expect(providerInfo({ AWS_PROFILE: 'p', CLUELESS_MODEL: 'anthropic.claude-opus-5-5' })?.model).toBe('anthropic.claude-opus-5-5')
+    expect(providerInfo({ AWS_PROFILE: 'p', CLUELESS_FAST_MODEL: 'anthropic.claude-sonnet-5-5' })?.fastModel).toBe('anthropic.claude-sonnet-5-5')
+  })
+
+  it('gives each job its own model, without server fallbacks on Haiku', () => {
+    expect(createTransport({ ANTHROPIC_API_KEY: 'sk' })).toMatchObject({ model: 'claude-sonnet-5-5', serverFallbacks: true })
+    expect(createTransport({ ANTHROPIC_API_KEY: 'sk' }, 'fast')).toMatchObject({ model: 'claude-haiku-5-5', serverFallbacks: false })
   })
 
   it('builds a Bedrock transport in tool mode', () => {
