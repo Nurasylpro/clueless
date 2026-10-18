@@ -1,10 +1,9 @@
 // A browser stand-in for `window.island` (`npm run ui`). It runs the real IslandController with a
-// fake Claude that answers after a short delay: code gets the Contains Duplicate trace, anything
-// else gets a text answer. No Electron, no API key.
+// fake Claude that replays a matching demo after a short delay. No Electron, no API key.
 import type { IslandApi, IslandView } from '../../../shared/contracts'
 import { IslandController, type TracerLike } from '../../../shared/islandController'
 import type { TraceReply } from '../../../shared/trace'
-import { CONTAINS_DUPLICATE } from './fixtures'
+import { demoReplyFor } from './fixtures'
 
 const THINK_MS = 1600
 
@@ -21,11 +20,16 @@ const fakeTracer = (): TracerLike => {
   const reply = (animate: boolean, text: string): Promise<TraceReply> =>
     new Promise((resolve) =>
       setTimeout(() => {
-        if (animate && looksLikeCode(text)) resolve(CONTAINS_DUPLICATE)
+        const demo = demoReplyFor(text)
+        if (animate && demo) resolve(demo)
+        else if (looksLikeCode(text) && !demo) resolve({
+          message: 'This browser preview has prepared replays for the examples in the dropdown. Select the whole example to watch it. To ask about other code or a few selected lines, use the Electron app connected to Claude.',
+          trace: null
+        })
         else
           resolve({
-            message: looksLikeCode(text)
-              ? 'This loop walks through `nums` and keeps every number it has met in a **set** called `seen`. Before adding a number it checks whether `seen` already has it. What does that tell you the moment the check is true?'
+            message: demo
+              ? demo.message
               : 'This asks whether **any value appears at least twice** in the array. You only need to know *whether* you have seen a number before, not how many times.',
             trace: null
           })

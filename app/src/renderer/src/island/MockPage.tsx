@@ -3,13 +3,15 @@
 import { useEffect, useState } from 'react'
 import type { IslandMock } from './mock'
 import { AskButton, IslandShell, useIslandView } from './IslandScreen'
-import { MOCK_CODE } from './fixtures'
+import { DEMO_EXAMPLES } from './fixtures'
 import { TraceOverlay } from './TraceOverlay'
 
 export function MockPage({ mock }: { mock: IslandMock }) {
   const view = useIslandView()
   const [hidden, setHidden] = useState(false)
   const [ask, setAsk] = useState<{ x: number; y: number } | null>(null)
+  const [exampleId, setExampleId] = useState<string>('correct')
+  const example = DEMO_EXAMPLES.find((item) => item.id === exampleId) ?? DEMO_EXAMPLES[0]
 
   useEffect(() => {
     document.body.classList.add('mock-desktop')
@@ -53,7 +55,12 @@ export function MockPage({ mock }: { mock: IslandMock }) {
   const playing = view?.phase === 'playing' && view.trace
   return (
     <div className="h-full overflow-hidden">
-      <FakeLeetCode />
+      <FakeLeetCode code={example.reply.trace.code} exampleId={exampleId} onExampleChange={(id) => {
+        setExampleId(id)
+        setAsk(null)
+        window.getSelection()?.removeAllRanges()
+        mock.closeCard()
+      }} />
       {!hidden && view && !playing && (
         <div data-island className="fixed left-1/2 top-1.5 z-40 -translate-x-1/2">
           <IslandShell view={view} />
@@ -80,7 +87,7 @@ export function MockPage({ mock }: { mock: IslandMock }) {
 }
 
 /** A LeetCode-like page: the problem on the left, the student's code on the right. Highlightable. */
-function FakeLeetCode() {
+function FakeLeetCode({ code, exampleId, onExampleChange }: { code: string; exampleId: string; onExampleChange: (id: string) => void }) {
   return (
     <div className="selectable grid h-full grid-cols-[1fr_1.3fr] gap-3 p-3 pt-20 text-zinc-300">
       <div className="overflow-hidden rounded-lg bg-zinc-900/80 p-5 text-[14px] leading-relaxed">
@@ -91,13 +98,22 @@ function FakeLeetCode() {
           return <code className="rounded bg-white/10 px-1">false</code> if every element is distinct.
         </p>
         <p className="mt-4 font-semibold text-white">Example 1:</p>
-        <pre className="mt-1 rounded bg-white/5 p-3 font-mono text-[13px]">{'Input: nums = [1,2,3,1]\nOutput: true'}</pre>
+        <pre className="mt-1 rounded bg-white/5 p-3 font-mono text-[13px]">{'Input: nums = [3,1,4,1]\nOutput: true'}</pre>
         <p className="mt-4 font-semibold text-white">Example 2:</p>
         <pre className="mt-1 rounded bg-white/5 p-3 font-mono text-[13px]">{'Input: nums = [1,2,3,4]\nOutput: false'}</pre>
       </div>
       <div className="overflow-hidden rounded-lg bg-[#1e1e1e] p-5">
-        <div className="mb-3 text-xs text-zinc-500">Python3 · Auto</div>
-        <pre className="font-mono text-[14px] leading-7 text-sky-200">{MOCK_CODE}</pre>
+        <div className="mb-3 flex items-center justify-between gap-3 text-xs text-zinc-400">
+          <label className="flex items-center gap-2">
+            Example
+            <select value={exampleId} onChange={(event) => onExampleChange(event.target.value)} className="rounded-md border border-white/15 bg-zinc-900 px-2 py-1.5 text-zinc-200">
+              {DEMO_EXAMPLES.map((example) => <option key={example.id} value={example.id}>{example.label}</option>)}
+            </select>
+          </label>
+          <span>Python3</span>
+        </div>
+        <p className="mb-3 text-xs text-zinc-500">Select the whole code below, then click Ask to watch this example.</p>
+        <pre className="font-mono text-[14px] leading-7 text-sky-200">{code}</pre>
       </div>
     </div>
   )

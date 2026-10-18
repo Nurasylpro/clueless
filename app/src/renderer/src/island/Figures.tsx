@@ -1,7 +1,7 @@
 // The simplest figures for a program's variables: a box for a value, a row of boxes for an array,
 // a grid, a bag for a set, key → value rows for a map. What the current step changed lights up
 // (white glow, new values pop in amber); what it only reads gets a thin outline; the rest dims.
-import { AnimatePresence, motion } from 'motion/react'
+import { AnimatePresence, motion, useReducedMotion } from 'motion/react'
 import type { EntityValue, TraceEntity } from '../../../shared/trace'
 import { cx } from '../components/ui'
 import type { Change } from './traceState'
@@ -23,14 +23,19 @@ export function Figure({
   value,
   change,
   state,
-  pointers
+  pointers,
+  emphasis,
+  celebrate = false
 }: {
   entity: TraceEntity
   value: EntityValue
   change: Change | undefined
   state: FigureState
   pointers: { name: string; index: number }[]
+  emphasis?: number
+  celebrate?: boolean
 }) {
+  const reducedMotion = useReducedMotion()
   return (
     <motion.div
       layout
@@ -39,14 +44,22 @@ export function Figure({
       exit={{ opacity: 0, scale: 0.85 }}
       transition={{ opacity: { duration: 0.5 }, default: SPRING }}
       className={cx(
-        'rounded-2xl px-4 pb-3.5 pt-2.5 transition-shadow duration-500',
-        state === 'changed'
+        'relative rounded-2xl px-4 pb-3.5 pt-2.5 transition-shadow duration-500',
+        celebrate
+          ? 'bg-emerald-400/[0.07] shadow-[0_0_0_1px_rgba(110,231,183,0.65),0_0_28px_rgba(52,211,153,0.15)]'
+          : state === 'changed'
           ? 'bg-white/[0.07] shadow-[0_0_0_2px_rgba(255,255,255,0.95),0_0_32px_rgba(255,255,255,0.28)]'
           : state === 'read'
             ? 'bg-white/[0.04] shadow-[0_0_0_1px_rgba(255,255,255,0.45)]'
             : 'bg-white/[0.03] shadow-[0_0_0_1px_rgba(255,255,255,0.08)]'
       )}
     >
+      {emphasis !== undefined && !reducedMotion && (
+        <motion.div key={emphasis} aria-hidden="true"
+          className="pointer-events-none absolute inset-0 rounded-2xl border-2 border-amber-200/80"
+          initial={{ opacity: 0.8, scale: 1 }} animate={{ opacity: 0, scale: 1.07 }}
+          transition={{ duration: 0.9, ease: 'easeOut' }} />
+      )}
       <div className="mb-2 font-mono text-[14px] text-zinc-400">{entity.name}</div>
       {entity.kind === 'value' && <ValueBox value={value.scalar} changed={Boolean(change?.added || change?.scalar)} />}
       {entity.kind === 'array' && <ArrayRow items={value.items} changed={change} pointers={pointers} />}

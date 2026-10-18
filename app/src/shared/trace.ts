@@ -24,9 +24,17 @@ export const EntityValue = z.object({
   rows: z.array(z.array(z.string())) // grid
 })
 
+const TraceOutcome = z.object({
+  status: z.enum(['matched', 'mismatch', 'unknown']),
+  expected: z.string(),
+  actual: z.string(),
+  evidence: z.string() // where the expected result comes from, not a claim of general correctness
+})
+
 export const TraceWire = z.object({
   message: z.string(), // Markdown, shown before the animation (or alone when there's none)
   language: z.string(), // "python", "cpp", ... ("" when it isn't code)
+  outcome: TraceOutcome,
   entities: z.array(
     z.object({
       id: z.string(),
@@ -75,6 +83,7 @@ export interface CodeTrace {
   code: string // the highlighted code, normalized; step line numbers point into it
   entities: TraceEntity[]
   steps: TraceStep[]
+  outcome?: z.infer<typeof TraceOutcome>
 }
 
 export interface TraceReply {
@@ -140,7 +149,19 @@ export function fromTraceWire(wire: TraceWireT, code: string): TraceReply {
     })
   }
 
-  const trace = entities.length && steps.length && lines.some((l) => l.trim()) ? { language: wire.language.trim(), code, entities, steps } : null
+  // Never celebrate a partial trace, an unsupported expectation, or a return that disagrees
+  // with the assessment. "True" alone says nothing about whether a solution is correct.
+  const assessment = wire.outcome
+  const final = steps.at(-1)
+  const expected = assessment.expected.trim()
+  const actual = assessment.actual.trim()
+  const evidence = assessment.evidence.trim()
+  const supported = wire.steps.length <= MAX_STEPS && final?.kind === 'return' &&
+    actual !== '' && final.result === actual && expected !== '' && evidence !== ''
+  const status = supported && assessment.status === 'matched' && expected === actual ? 'matched'
+    : supported && assessment.status === 'mismatch' && expected !== actual ? 'mismatch' : 'unknown'
+  const outcome: z.infer<typeof TraceOutcome> = { status, expected, actual, evidence }
+  const trace = entities.length && steps.length && lines.some((l) => l.trim()) ? { language: wire.language.trim(), code, entities, steps, outcome } : null
   return { message, trace }
 }
 
