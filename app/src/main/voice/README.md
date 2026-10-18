@@ -2,7 +2,7 @@
 
 Everything else is wired up. Voice plugs in here and in `src/renderer/src/components/MicButton.tsx`.
 
-**Goal (SPEC.md §5, F9):**
+**Goal (see DESIGN.md):**
 - **Press to talk:** recording stops on its own when you pause.
 - **Think-aloud mode:** the student explains their plan out loud, and Clueless only speaks up if something's off.
 
