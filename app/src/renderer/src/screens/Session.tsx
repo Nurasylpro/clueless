@@ -85,6 +85,19 @@ function isOpeningQuestion(session: SessionView): boolean {
   )
 }
 
+/**
+ * The options to show under the latest reply. None once the student has answered (they'd sit
+ * there while Clueless thinks), and the opening "where are you stuck?" options never come back.
+ */
+function openChoices(session: SessionView): string[] {
+  if (session.expects !== 'choice' || session.recap) return []
+  const last = session.thread.filter((t) => t.role !== 'system').at(-1)
+  if (!last || last.role !== 'tutor') return []
+  const opening = session.thread.find((t) => t.role === 'tutor')
+  const asked = opening?.role === 'tutor' && opening !== last ? new Set(opening.turn.choices) : new Set<string>()
+  return session.choices.filter((c) => !asked.has(c))
+}
+
 // ---------- problem + plan ----------
 
 const SUBJECTS: Subject[] = ['coding', 'math', 'physics', 'other']
@@ -526,6 +539,7 @@ function Composer({
     }
   }
 
+  const choices = openChoices(session)
   const placeholder = opening
     ? 'Something else? Type it here…'
     : mode === 'recall'
@@ -548,11 +562,10 @@ function Composer({
           ))}
         </div>
       ) : (
-        session.expects === 'choice' &&
-        session.choices.length > 0 &&
+        choices.length > 0 &&
         mode === 'answer' && (
           <div className="mb-2 flex flex-wrap gap-1.5">
-            {session.choices.map((c) => (
+            {choices.map((c) => (
               <Button key={c} variant="chip" disabled={disabled} onClick={() => submit(c)}>
                 {c}
               </Button>
