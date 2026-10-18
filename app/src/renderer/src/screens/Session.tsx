@@ -40,6 +40,7 @@ type ComposerMode = 'answer' | 'recall'
 export function SessionScreen({ session, onOpenReview }: { session: SessionView; onOpenReview: () => void }) {
   const [mode, setMode] = useState<ComposerMode>('answer')
   const ready = Boolean(session.problem) && !session.busy
+  const opening = isOpeningQuestion(session)
   // Voice: what you say is sent exactly like a typed answer (spoken math goes as text, so the checker
   // and the tutor read it like a typed sentence); new replies are read aloud in voice mode.
   const conv = useVoiceConversation({
@@ -54,7 +55,7 @@ export function SessionScreen({ session, onOpenReview }: { session: SessionView;
   return (
     <div className="session-screen flex min-h-0 flex-col">
       {session.problem && <ProblemBar problem={session.problem} />}
-      {session.plan.length > 0 && <PlanList plan={session.plan} disabled={!ready || Boolean(session.recap)} />}
+      {session.plan.length > 0 && !opening && <PlanList plan={session.plan} disabled={!ready || Boolean(session.recap)} />}
       <LatestExchange session={session} onOpenReview={onOpenReview} onReadAloud={conv.readAloud} />
       {session.stuck.level === 2 && !session.busy && !session.recap && (
         <StuckBubble reason={session.stuck.reason} onRecall={() => setMode('recall')} />
@@ -63,9 +64,24 @@ export function SessionScreen({ session, onOpenReview }: { session: SessionView;
         // Without a problem there's nothing to retry: offer a way back to the start screen instead.
         <ErrorBox message={session.error} canRetry={Boolean(session.problem)} onDismiss={session.problem ? null : () => api.action('new')} />
       )}
-      {session.problem && !session.recap && <QuickActions session={session} disabled={!ready} />}
-      {session.problem && <Composer session={session} mode={mode} setMode={setMode} disabled={!ready} conv={conv} />}
+      {session.problem && !session.recap && !opening && <QuickActions session={session} disabled={!ready} />}
+      {session.problem && (
+        <Composer session={session} mode={mode} setMode={setMode} disabled={!ready} conv={conv} opening={opening} />
+      )}
     </div>
+  )
+}
+
+/**
+ * Right after a scan Clueless asks "What's tripping you up?" with options. Until the student
+ * answers, hints, the plan and the answer-mode toggle don't apply yet, so they're hidden.
+ */
+function isOpeningQuestion(session: SessionView): boolean {
+  return (
+    session.expects === 'choice' &&
+    session.choices.length > 0 &&
+    !session.recap &&
+    !session.thread.some((t) => t.role === 'student')
   )
 }
 
@@ -467,13 +483,15 @@ function Composer({
   mode,
   setMode,
   disabled,
-  conv
+  conv,
+  opening
 }: {
   session: SessionView
   mode: ComposerMode
   setMode: (m: ComposerMode) => void
   disabled: boolean
   conv: VoiceConversation
+  opening: boolean
 }) {
   const [text, setText] = useState('')
   const input = useRef<HTMLTextAreaElement>(null)
@@ -508,8 +526,9 @@ function Composer({
     }
   }
 
-  const placeholder =
-    mode === 'recall'
+  const placeholder = opening
+    ? 'Something else? Type it here…'
+    : mode === 'recall'
       ? 'What did you forget? e.g. "how to make a list of 9 sets"'
       : as === 'math'
         ? 'Type your answer, e.g. x^2 e^x - 2x e^x + 2e^x + C'
@@ -519,54 +538,69 @@ function Composer({
 
   return (
     <div className="px-3 pb-2.5 pt-1.5">
-      {session.expects === 'choice' && session.choices.length > 0 && mode === 'answer' && (
-        <div className="mb-2 flex flex-wrap gap-1.5">
+      {opening ? (
+        // The opening options get the room: one full-width row each.
+        <div className="mb-2 flex flex-col gap-1">
           {session.choices.map((c) => (
-            <Button key={c} variant="chip" disabled={disabled} onClick={() => submit(c)}>
+            <Button key={c} variant="chip" disabled={disabled} onClick={() => submit(c)} className="w-full !justify-start">
               {c}
             </Button>
           ))}
         </div>
+      ) : (
+        session.expects === 'choice' &&
+        session.choices.length > 0 &&
+        mode === 'answer' && (
+          <div className="mb-2 flex flex-wrap gap-1.5">
+            {session.choices.map((c) => (
+              <Button key={c} variant="chip" disabled={disabled} onClick={() => submit(c)}>
+                {c}
+              </Button>
+            ))}
+          </div>
+        )
       )}
-      <div className="mb-1 flex items-center gap-1 text-[10.5px]">
-        {(['answer', 'recall'] as const).map((m) => (
+      {!opening && (
+        <div className="mb-1 flex items-center gap-1 text-[10.5px]">
+          {(['answer', 'recall'] as const).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setMode(m)}
+              className={cx(
+                'no-drag whitespace-nowrap rounded-full px-2 py-0.5 transition-colors',
+                mode === m
+                  ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
+                  : 'text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-white/10'
+              )}
+            >
+              {m === 'answer' ? 'Answer' : 'How do I write…?'}
+            </button>
+          ))}
+          {mode === 'recall' ? (
+            <IconButton title="Back to answering" onClick={() => setMode('answer')} className="h-5 w-5">
+              <BackIcon size={12} />
+            </IconButton>
+          ) : (
+            <AnimateMenu disabled={disabled} />
+          )}
           <button
-            key={m}
             type="button"
-            onClick={() => setMode(m)}
+            onClick={() => conv.setEnabled(!conv.enabled)}
+            aria-pressed={conv.enabled}
+            title={conv.enabled ? 'Voice on: replies are read aloud. Click to turn off' : 'Voice off. Click to have replies read aloud'}
             className={cx(
-              'no-drag whitespace-nowrap rounded-full px-2 py-0.5 transition-colors',
-              mode === m
-                ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
+              'no-drag ml-auto flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 transition-colors',
+              conv.enabled
+                ? 'bg-claude-100 text-claude-800 dark:bg-claude-500/15 dark:text-claude-400'
                 : 'text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-white/10'
             )}
           >
-            {m === 'answer' ? 'Answer' : 'How do I write…?'}
+            {conv.enabled ? <SpeakerIcon size={11} /> : <SpeakerOffIcon size={11} />}
+            Voice {conv.enabled ? 'on' : 'off'}
           </button>
-        ))}
-        {mode === 'recall' ? (
-          <IconButton title="Back to answering" onClick={() => setMode('answer')} className="h-5 w-5">
-            <BackIcon size={12} />
-          </IconButton>
-        ) : (
-          <AnimateMenu disabled={disabled} />
-        )}
-        <button
-          type="button"
-          onClick={() => conv.setEnabled(!conv.enabled)}
-          aria-pressed={conv.enabled}
-          title={conv.enabled ? 'Voice on: replies are read aloud. Click to turn off' : 'Voice off. Click to have replies read aloud'}
-          className={cx(
-            'no-drag ml-auto flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 transition-colors',
-            conv.enabled
-              ? 'bg-claude-100 text-claude-800 dark:bg-claude-500/15 dark:text-claude-400'
-              : 'text-zinc-500 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-white/10'
-          )}
-        >
-          {conv.enabled ? <SpeakerIcon size={11} /> : <SpeakerOffIcon size={11} />}
-          Voice {conv.enabled ? 'on' : 'off'}
-        </button>
-      </div>
+        </div>
+      )}
       <SpeakingStrip conv={conv} onStop={speech.stop} onPause={speech.pause} onResume={speech.resume} />
       <VoiceStrip voice={conv.input} onDismiss={conv.input.cancel} />
       <div className="flex items-end gap-1.5 rounded-xl border border-zinc-900/10 bg-white/70 px-2 py-1 focus-within:border-claude-500 dark:border-white/15 dark:bg-black/35">
