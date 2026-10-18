@@ -180,6 +180,17 @@ describe('Tutor on Bedrock (reply tool)', () => {
     expect(last[1].text).toBe('[HINT]')
   })
 
+  it('fills in left-out empty fields (visual, check, recap) instead of asking again', async () => {
+    const { visual: _v, check: _c, ...turnWithoutEmpties } = wireTurn as Record<string, unknown>
+    const { client, calls } = fakeClient([asTool({ problem, turn: turnWithoutEmpties }, 'toolu_1')])
+    const reply = await new Tutor(transport(client, 'tool')).start({ text: 'p' })
+    expect(calls).toHaveLength(1)
+    expect(reply.turn.message).toBe('What do you get?')
+    expect(reply.turn.visual).toBeNull()
+    expect(reply.turn.check).toBeNull()
+    expect(reply.recap).toBeNull()
+  })
+
   it('asks again once when the tool input does not match the schema', async () => {
     const { client, calls } = fakeClient([
       asTool({ problem, turn: { kind: 'question' }, recap: null }, 'toolu_bad'),

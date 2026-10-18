@@ -195,7 +195,7 @@ export class Tutor implements TutorLike {
     const call = response.content.find((b) => b.type === 'tool_use' && b.name === REPLY_TOOL.name)
     if (call && call.type === 'tool_use') {
       this.pendingToolUseId = call.id
-      const parsed = WireReply.safeParse(call.input)
+      const parsed = WireReply.safeParse(withEmptyDefaults(call.input))
       if (parsed.success) return fromWire(parsed.data)
       if (retries > 0) {
         const problems = parsed.error.issues.slice(0, 6).map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')
@@ -271,6 +271,33 @@ interface Turn {
   text: string
   images?: ImageInput[]
   toolError?: string
+}
+
+/**
+ * Tool mode has no schema enforcement, and Claude sometimes leaves out fields that would only be
+ * empty anyway (no visual, no answer check, no recap). Fill those in instead of spending a whole
+ * extra request asking again; anything that carries content (message, kind, plan...) still has
+ * to be there.
+ */
+export function withEmptyDefaults(input: unknown): unknown {
+  if (!input || typeof input !== 'object') return input
+  const reply = input as Record<string, unknown>
+  const turn = reply.turn && typeof reply.turn === 'object' ? (reply.turn as Record<string, unknown>) : null
+  return {
+    ...reply,
+    problem: reply.problem ?? null,
+    recap: reply.recap ?? null,
+    turn: turn && {
+      hintLevel: 0,
+      verdict: 'none',
+      gap: { type: 'none', topic: '' },
+      expects: 'text',
+      choices: [],
+      ...turn,
+      visual: { caption: '', frames: [], focus: [], ...(turn.visual as object | undefined) },
+      check: turn.check ?? { kind: 'none', reference: '', variable: '', unit: '' }
+    }
+  }
 }
 
 /** A copy of the history with a cache breakpoint on the last block of the newest user message. */
