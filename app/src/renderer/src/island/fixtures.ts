@@ -1,5 +1,5 @@
-// A hand-written trace for the browser mock (`npm run ui`) and the tests: LeetCode 217,
-// Contains Duplicate, run on nums = [3, 1, 4, 1]. Same shape Claude sends.
+// Hand-written traces for the browser mock (`npm run ui`) and the tests: LeetCode 217,
+// Contains Duplicate, plus two buggy versions. Same shape Claude sends, words included.
 import { normalizeSnippet, type EntityValue, type TraceReply, type TraceStep } from '../../../shared/trace'
 
 export const MOCK_CODE = `class Solution:
@@ -13,7 +13,7 @@ export const MOCK_CODE = `class Solution:
         return False`
 
 const v = (over: Partial<EntityValue>): EntityValue => ({ scalar: '', items: [], entries: [], rows: [], ...over })
-const step = (line: number, focus: string, kind: TraceStep['kind'], over: Partial<TraceStep> = {}): TraceStep => ({
+const step = (line: number, focus: string, kind: TraceStep['kind'], say: string, over: Partial<TraceStep> = {}): TraceStep => ({
   line,
   endLine: line,
   focus,
@@ -21,28 +21,46 @@ const step = (line: number, focus: string, kind: TraceStep['kind'], over: Partia
   result: '',
   reads: [],
   updates: [],
+  say,
   ...over
 })
 
 const NUMS = ['3', '1', '4', '1']
+const ORDINAL = ['first', 'second', 'third', 'fourth']
 
 function pass(i: number, seenBefore: string[]): TraceStep[] {
   const n = NUMS[i]
   const repeat = seenBefore.includes(n)
   const steps = [
-    step(4, 'for i in range(len(nums)):', 'loop', { reads: ['nums'], updates: [{ entity: 'i', value: v({ scalar: String(i) }) }] }),
-    step(5, 'n = nums[i]', 'assign', { reads: ['nums', 'i'], updates: [{ entity: 'n', value: v({ scalar: n }) }] }),
-    step(6, 'n in seen', 'condition', { result: repeat ? 'true' : 'false', reads: ['n', 'seen'] })
+    step(4, 'for i in range(len(nums)):', 'loop', i === 0 ? '`i` starts at 0, the first number.' : `\`i\` moves to ${i}, the ${ORDINAL[i]} number.`, {
+      reads: ['nums'],
+      updates: [{ entity: 'i', value: v({ scalar: String(i) }) }]
+    }),
+    step(5, 'n = nums[i]', 'assign', `\`n\` takes the number at that spot: ${n}.`, {
+      reads: ['nums', 'i'],
+      updates: [{ entity: 'n', value: v({ scalar: n }) }]
+    }),
+    step(6, 'n in seen', 'condition', repeat ? `Is ${n} already in \`seen\`? Yes, we saw it before!` : `Is ${n} already in \`seen\`? No.`, {
+      result: repeat ? 'true' : 'false',
+      reads: ['n', 'seen']
+    })
   ]
-  if (repeat) steps.push(step(7, 'return True', 'return', { result: 'True' }))
-  else steps.push(step(8, 'seen.add(n)', 'call', { reads: ['n'], updates: [{ entity: 'seen', value: v({ items: [...seenBefore, n] }) }] }))
+  if (repeat) steps.push(step(7, 'return True', 'return', 'So we return True: a number appears twice.', { result: 'True' }))
+  else
+    steps.push(
+      step(8, 'seen.add(n)', 'call', `So we remember it: ${n} goes into \`seen\`.`, {
+        reads: ['n'],
+        updates: [{ entity: 'seen', value: v({ items: [...seenBefore, n] }) }]
+      })
+    )
   return steps
 }
 
 export const CONTAINS_DUPLICATE: TraceReply & { trace: NonNullable<TraceReply['trace']> } = {
   message:
-    'Watch `seen` fill up as the loop walks through `nums = [3, 1, 4, 1]`. Keep an eye on the moment a number shows up that is already inside `seen`.',
+    'The loop walked through `nums = [3, 1, 4, 1]`, adding each new number to `seen`. 3, 1 and 4 were new. When the second **1** arrived, `n in seen` was true for the first time, so the function returned **True** right away.',
   trace: {
+    intro: 'Let’s run it on nums = [3, 1, 4, 1] and watch `seen` fill up.',
     language: 'python',
     outcome: { status: 'matched', expected: 'True', actual: 'True', evidence: 'For nums = [3, 1, 4, 1], the value 1 appears twice.' },
     code: MOCK_CODE,
@@ -53,8 +71,8 @@ export const CONTAINS_DUPLICATE: TraceReply & { trace: NonNullable<TraceReply['t
       { id: 'n', name: 'n', kind: 'value', indexOf: null }
     ],
     steps: [
-      step(2, 'nums: List[int]', 'call', { updates: [{ entity: 'nums', value: v({ items: NUMS }) }] }),
-      step(3, 'seen = set()', 'declare', { updates: [{ entity: 'seen', value: v({}) }] }),
+      step(2, 'nums: List[int]', 'call', 'We start with `nums` holding 3, 1, 4 and 1.', { updates: [{ entity: 'nums', value: v({ items: NUMS }) }] }),
+      step(3, 'seen = set()', 'declare', '`seen` starts as an empty set.', { updates: [{ entity: 'seen', value: v({}) }] }),
       ...pass(0, []),
       ...pass(1, ['3']),
       ...pass(2, ['3', '1']),
@@ -66,31 +84,35 @@ export const CONTAINS_DUPLICATE: TraceReply & { trace: NonNullable<TraceReply['t
 type DemoReply = typeof CONTAINS_DUPLICATE
 
 export const WRONG_CONDITION: DemoReply = {
-  message: 'Watch what happens when the first number is checked against an empty `seen`. This input has no duplicates. Which branch does the code take?',
+  message:
+    'On `nums = [1, 2, 3, 4]` there are no duplicates, but the very first check `n not in seen` was true, because `seen` was still empty. So the function returned **True** after one number. Which way round should that check be?',
   trace: {
     ...CONTAINS_DUPLICATE.trace,
+    intro: 'Let’s run it on nums = [1, 2, 3, 4], which has no duplicates.',
     code: MOCK_CODE.replace('if n in seen:', 'if n not in seen:'),
     outcome: { status: 'mismatch', expected: 'False', actual: 'True', evidence: 'Example 2: nums = [1, 2, 3, 4] has no duplicate.' },
     steps: [
-      step(2, 'nums: List[int]', 'call', { updates: [{ entity: 'nums', value: v({ items: ['1', '2', '3', '4'] }) }] }),
-      step(3, 'seen = set()', 'declare', { updates: [{ entity: 'seen', value: v({}) }] }),
-      step(4, 'for i in range(len(nums)):', 'loop', { reads: ['nums'], updates: [{ entity: 'i', value: v({ scalar: '0' }) }] }),
-      step(5, 'n = nums[i]', 'assign', { reads: ['nums', 'i'], updates: [{ entity: 'n', value: v({ scalar: '1' }) }] }),
-      step(6, 'n not in seen', 'condition', { result: 'true', reads: ['n', 'seen'] }),
-      step(7, 'return True', 'return', { result: 'True' })
+      step(2, 'nums: List[int]', 'call', 'We start with `nums` holding 1, 2, 3 and 4.', { updates: [{ entity: 'nums', value: v({ items: ['1', '2', '3', '4'] }) }] }),
+      step(3, 'seen = set()', 'declare', '`seen` starts as an empty set.', { updates: [{ entity: 'seen', value: v({}) }] }),
+      step(4, 'for i in range(len(nums)):', 'loop', '`i` starts at 0, the first number.', { reads: ['nums'], updates: [{ entity: 'i', value: v({ scalar: '0' }) }] }),
+      step(5, 'n = nums[i]', 'assign', '`n` takes the first number: 1.', { reads: ['nums', 'i'], updates: [{ entity: 'n', value: v({ scalar: '1' }) }] }),
+      step(6, 'n not in seen', 'condition', 'Is 1 not in `seen`? True, seen is still empty.', { result: 'true', reads: ['n', 'seen'] }),
+      step(7, 'return True', 'return', 'So it returns True after just one number.', { result: 'True' })
     ]
   }
 }
 
 export const EARLY_RETURN: DemoReply = {
-  message: 'Watch how many numbers reach `seen` before the function returns. Does the loop ever reach the second `1`?',
+  message:
+    'On `nums = [3, 1, 4, 1]`, only 3 reached `seen`. The `return False` sits inside the loop, so the function stopped after the first pass and never saw the second **1**. Where should that line be?',
   trace: {
     ...CONTAINS_DUPLICATE.trace,
+    intro: 'Let’s run it on nums = [3, 1, 4, 1] and count how many numbers get checked.',
     code: MOCK_CODE.replace('        return False', '            return False'),
     outcome: { status: 'mismatch', expected: 'True', actual: 'False', evidence: 'Example 1: nums = [3, 1, 4, 1] contains a duplicate.' },
     steps: [
       ...CONTAINS_DUPLICATE.trace.steps.slice(0, 6),
-      step(9, 'return False', 'return', { result: 'False' })
+      step(9, 'return False', 'return', 'And it returns False already, inside the loop.', { result: 'False' })
     ]
   }
 }

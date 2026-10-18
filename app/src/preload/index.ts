@@ -42,18 +42,20 @@ const api: CluelessApi = {
 
 contextBridge.exposeInMainWorld('clueless', api)
 
-// The island and the Ask button.
+// The island and the Ask button. (The mic and the reading voice use `window.clueless`'s voice part.)
 const island: IslandApi = {
   getView: () => ipcRenderer.invoke(ISLAND_IPC.getView),
   onView: (cb) => listen(ISLAND_IPC.view, cb),
   setAnimate: (on) => ipcRenderer.send(ISLAND_IPC.setAnimate, on),
-  followUp: (text) => ipcRenderer.send(ISLAND_IPC.followUp, text),
-  closeCard: () => ipcRenderer.send(ISLAND_IPC.closeCard),
+  setVoice: (on) => ipcRenderer.send(ISLAND_IPC.setVoice, on),
+  setExpanded: (open) => ipcRenderer.send(ISLAND_IPC.setExpanded, open),
+  askText: (text) => ipcRenderer.send(ISLAND_IPC.askText, text),
+  replay: () => ipcRenderer.send(ISLAND_IPC.replay),
   finishAnimation: () => ipcRenderer.send(ISLAND_IPC.finish),
-  hide: () => ipcRenderer.send(ISLAND_IPC.hide),
   resize: (size) => ipcRenderer.send(ISLAND_IPC.resize, size),
   holdCard: (hold) => ipcRenderer.send(ISLAND_IPC.hold, hold),
-  ask: () => ipcRenderer.send(ISLAND_IPC.ask)
+  ask: () => ipcRenderer.send(ISLAND_IPC.ask),
+  onMicToggle: (cb) => listen(ISLAND_IPC.micToggle, cb)
 }
 
 contextBridge.exposeInMainWorld('island', island)

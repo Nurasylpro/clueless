@@ -1,7 +1,8 @@
-// Browser mock mode (`npm run ui`): a fake LeetCode page with the island on top. Highlight some
-// code or text with the mouse, click Ask. Ctrl+Shift+2 shows the island again after Hide.
-import { useEffect, useState } from 'react'
-import type { IslandMock } from './mock'
+// Browser mock mode (`npm run ui`): a fake LeetCode page with the island on top. Highlight the code
+// and click Ask, or open the island and type, or click the mic (it pretends you spoke).
+// Ctrl+Shift+2 hides / shows the island, Ctrl+Shift+1 starts the mic, like the real app.
+import { useEffect, useRef, useState } from 'react'
+import { setMockPageCode, type IslandMock } from './mock'
 import { AskButton, IslandShell, useIslandView } from './IslandScreen'
 import { DEMO_EXAMPLES } from './fixtures'
 import { TraceOverlay } from './TraceOverlay'
@@ -9,16 +10,30 @@ import { TraceOverlay } from './TraceOverlay'
 export function MockPage({ mock }: { mock: IslandMock }) {
   const view = useIslandView()
   const [hidden, setHidden] = useState(false)
+  const hiddenRef = useRef(false)
   const [ask, setAsk] = useState<{ x: number; y: number } | null>(null)
   const [exampleId, setExampleId] = useState<string>('correct')
   const example = DEMO_EXAMPLES.find((item) => item.id === exampleId) ?? DEMO_EXAMPLES[0]
+  // Questions with nothing highlighted are about the code on this page.
+  useEffect(() => setMockPageCode(example.reply.trace.code), [example])
 
   useEffect(() => {
     document.body.classList.add('mock-desktop')
-    const offHidden = mock.onHidden(setHidden)
+    const offHidden = mock.onHidden((h) => {
+      hiddenRef.current = h
+      setHidden(h)
+    })
     const onKey = (e: KeyboardEvent): void => {
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === '@') mock.show()
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === 'Digit2') mock.show()
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === 'Digit2') {
+        e.preventDefault()
+        if (hiddenRef.current) mock.show()
+        else mock.hide()
+      }
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.code === 'Digit1') {
+        e.preventDefault()
+        mock.show()
+        mock.toggleMic()
+      }
       setAsk(null)
     }
     // Like the real app: once a highlight stops changing, show Ask where it ends.
@@ -59,7 +74,7 @@ export function MockPage({ mock }: { mock: IslandMock }) {
         setExampleId(id)
         setAsk(null)
         window.getSelection()?.removeAllRanges()
-        mock.closeCard()
+        mock.setExpanded(false)
       }} />
       {!hidden && view && !playing && (
         <div data-island className="fixed left-1/2 top-1.5 z-40 -translate-x-1/2">
@@ -68,7 +83,7 @@ export function MockPage({ mock }: { mock: IslandMock }) {
       )}
       {hidden && (
         <div className="fixed left-1/2 top-3 z-40 -translate-x-1/2 rounded-full bg-black/60 px-3 py-1 text-xs text-zinc-400">
-          Hidden. Press Ctrl+Shift+2 to show the island.
+          Hidden. Press Ctrl+Shift+2 to show the island again.
         </div>
       )}
       {ask && !hidden && (
@@ -81,7 +96,7 @@ export function MockPage({ mock }: { mock: IslandMock }) {
           />
         </div>
       )}
-      {playing && <TraceOverlay trace={view.trace!} onClose={() => mock.finishAnimation()} />}
+      {playing && <TraceOverlay key={view.playId} trace={view.trace!} voice={view.voice} onClose={() => mock.finishAnimation()} />}
     </div>
   )
 }

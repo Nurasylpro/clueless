@@ -279,11 +279,11 @@ export interface CluelessApi {
   tts(req: TtsRequest): Promise<TtsResult>
 }
 
-// ---------- the island (the floating pill: highlight -> Ask -> text, then the animation) ----------
+// ---------- the island (the floating pill: Mic · Animate · Voice · Expand) ----------
 
-/** idle = just the pill · thinking / answer / reading = the pill with a text card under it ·
- *  playing = the full-screen animation. "reading" is the 4 s before an animation starts. */
-export type IslandPhase = 'idle' | 'thinking' | 'answer' | 'reading' | 'playing'
+/** idle = nothing in progress (the card shows only if expanded) · thinking = waiting for Claude ·
+ *  answer = a text answer is ready (the card opens) · playing = the full-screen animation. */
+export type IslandPhase = 'idle' | 'thinking' | 'answer' | 'playing'
 
 export interface IslandMessage {
   role: 'student' | 'clueless'
@@ -291,11 +291,14 @@ export interface IslandMessage {
 }
 
 export interface IslandView {
-  animate: boolean // the Animate On/Off toggle
+  animate: boolean // Animate On/Off: code answers play step by step on the full screen
+  voice: boolean // Voice On/Off: answers and every animation step are read aloud
+  expanded: boolean // the card under the pill (answers, the recap, the text box) is open
   phase: IslandPhase
-  snippet: string | null // the highlighted text being discussed
-  messages: IslandMessage[]
-  trace: CodeTrace | null // set while reading / playing
+  snippet: string | null // the highlight being discussed; null = a question about the screen
+  messages: IslandMessage[] // with an animation, Clueless's message is the recap (under 60 words)
+  trace: CodeTrace | null // the latest animation; kept after it has played, for "Watch again"
+  playId: number // bumps every time an animation starts playing
   busySince: number | null // when the current Claude call started
   error: string | null
 }
@@ -304,25 +307,30 @@ export const ISLAND_IPC = {
   view: 'island:view', // main -> UI: IslandView
   getView: 'island:get-view', // invoke
   setAnimate: 'island:animate', // boolean
-  followUp: 'island:follow-up', // string
-  closeCard: 'island:close-card',
+  setVoice: 'island:voice', // boolean
+  setExpanded: 'island:expanded', // boolean
+  askText: 'island:ask-text', // string: typed or spoken in the card
+  replay: 'island:replay', // play the latest animation again
   finish: 'island:finish', // the animation was clicked away
-  hide: 'island:hide',
   resize: 'island:resize', // { width, height } of the pill / card content
-  hold: 'island:hold', // boolean: the mouse is over the card (don't auto-close)
-  ask: 'island:ask' // the Ask button next to the cursor was clicked
+  hold: 'island:hold', // boolean: the mouse is over the card, or it is being read aloud
+  ask: 'island:ask', // the Ask button next to the cursor was clicked
+  micToggle: 'island:mic-toggle' // main -> UI: the mic hotkey was pressed
 } as const
 
-/** The API the preload script exposes as `window.island` (the island and the Ask button windows). */
+/** The API the preload script exposes as `window.island` (the island and the Ask button windows).
+ *  The microphone and the voice that reads answers aloud use `window.clueless` (voice section). */
 export interface IslandApi {
   getView(): Promise<IslandView>
   onView(cb: (view: IslandView) => void): () => void
   setAnimate(on: boolean): void
-  followUp(text: string): void
-  closeCard(): void
+  setVoice(on: boolean): void
+  setExpanded(open: boolean): void
+  askText(text: string): void
+  replay(): void
   finishAnimation(): void
-  hide(): void
   resize(size: { width: number; height: number }): void
   holdCard(hold: boolean): void
   ask(): void
+  onMicToggle(cb: () => void): () => void
 }

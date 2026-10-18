@@ -12,6 +12,9 @@ export interface IslandMock extends IslandApi {
   select(text: string): void
   onHidden(cb: (hidden: boolean) => void): () => void
   show(): void
+  hide(): void
+  /** Ctrl+Shift+1 in the page. */
+  toggleMic(): void
 }
 
 const looksLikeCode = (text: string): boolean => /[=(){}[\]:;]/.test(text) && /\n|def |for |if |return/.test(text)
@@ -41,13 +44,26 @@ const fakeTracer = (): TracerLike => {
       snippet = input.snippet
       return reply(input.animate, input.snippet)
     },
+    // Nothing highlighted: the preview "reads" the code on the fake page, like Claude reads the screenshot.
+    askScreen: (input) => {
+      snippet = currentCode()
+      return reply(input.animate, snippet)
+    },
     followUp: (_text, animate) => reply(animate, snippet)
   }
+}
+
+/** The code on the fake LeetCode page (MockPage sets it). */
+let pageCode = ''
+const currentCode = (): string => pageCode
+export function setMockPageCode(code: string): void {
+  pageCode = code
 }
 
 export function createIslandMock(): IslandMock {
   const listeners = new Set<(v: IslandView) => void>()
   const hiddenListeners = new Set<(h: boolean) => void>()
+  const micListeners = new Set<() => void>()
   let pending: string | null = null
 
   const controller = new IslandController({
@@ -70,14 +86,21 @@ export function createIslandMock(): IslandMock {
       return () => listeners.delete(cb)
     },
     setAnimate: (on) => controller.setAnimate(on),
-    followUp: (text) => void controller.followUp(text),
-    closeCard: () => controller.closeCard(),
+    setVoice: (on) => controller.setVoice(on),
+    setExpanded: (open) => controller.setExpanded(open),
+    askText: (text) => void controller.askText(text),
+    replay: () => controller.replay(),
     finishAnimation: () => controller.finishAnimation(),
     hide: () => {
-      controller.closeCard()
+      controller.hide()
       setHidden(true)
     },
     show: () => setHidden(false),
+    onMicToggle: (cb) => {
+      micListeners.add(cb)
+      return () => micListeners.delete(cb)
+    },
+    toggleMic: () => micListeners.forEach((cb) => cb()),
     resize: () => {},
     holdCard: (hold) => controller.holdCard(hold),
     ask: () => {

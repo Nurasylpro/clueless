@@ -1,10 +1,12 @@
 // A code trace: what "Ask" on highlighted code comes back with when Animate is on.
-// Claude reads the highlighted code and writes down every step it runs: which line, which part
-// of the line, and the new value of every variable ("entity") that changed. The app draws the
-// entities as simple figures on the left and the code on the right, spotlighting each step.
+// Every step the code runs: which line, which part of the line, the new value of every variable
+// ("entity") that changed, and one short sentence saying what happens (shown on top of the
+// animation, and read aloud when Voice is on). Python is run for real to get the steps
+// (src/main/run); for other languages Claude reads the code and writes them down itself.
 //
 // The wire schema has no unions (fast to compile as a structured output); "nothing" is "" or [].
 import { z } from 'zod'
+import { narrateStep } from './narrate'
 
 export const EntityKind = z.enum([
   'value', // a number, string, bool, None, ...: one box
@@ -32,8 +34,14 @@ const TraceOutcome = z.object({
 })
 
 export const TraceWire = z.object({
-  message: z.string(), // Markdown, shown before the animation (or alone when there's none)
+  // Markdown. With an animation: the recap shown in the island after it has played (under 60
+  // words). Without one: the answer itself.
+  message: z.string(),
+  intro: z.string(), // animation only: one short sentence shown (and said) before step 1; else ""
   language: z.string(), // "python", "cpp", ... ("" when it isn't code)
+  // A question about the screen (no highlight) that Claude animates anyway: the code it traced,
+  // copied exactly from the screenshot; step line numbers point into it. "" otherwise.
+  code: z.string(),
   outcome: TraceOutcome,
   entities: z.array(
     z.object({
@@ -51,10 +59,24 @@ export const TraceWire = z.object({
       kind: StepKind,
       result: z.string(), // condition: "true" / "false"; return: the value; else ""
       reads: z.array(z.string()), // ids of entities this step reads
-      updates: z.array(z.object({ entity: z.string(), value: EntityValue })) // full new values
+      updates: z.array(z.object({ entity: z.string(), value: EntityValue })), // full new values
+      say: z.string() // one short sentence: what happens here and why (shown on top, read aloud)
     })
-  ) // [] = no animation (Animate off, or the highlight isn't code)
+  ), // [] = no animation (Animate off, the highlight isn't code, or the app runs it: see run)
+  // [RUN] only: how the app runs the highlighted Python itself. "" otherwise.
+  run: z.object({
+    setup: z.string(), // runs first: the inputs the code needs
+    call: z.string() // runs after it to start it, e.g. "Solution().twoSum([2, 7, 11, 15], 9)"
+  })
 })
+
+/** [NARRATE]: after the app ran the code itself, Claude writes the words for the steps it got. */
+export const NarrationWire = z.object({
+  intro: z.string(),
+  message: z.string(),
+  says: z.array(z.string()) // one per step, in order
+})
+export type NarrationWireT = z.infer<typeof NarrationWire>
 
 export type EntityKind = z.infer<typeof EntityKind>
 export type StepKind = z.infer<typeof StepKind>
@@ -76,9 +98,11 @@ export interface TraceStep {
   result: string
   reads: string[]
   updates: { entity: string; value: EntityValue }[]
+  say: string // never empty after fromTraceWire / withNarration: the app fills any gap itself
 }
 
 export interface CodeTrace {
+  intro: string // shown (and said) before step 1
   language: string
   code: string // the highlighted code, normalized; step line numbers point into it
   entities: TraceEntity[]
@@ -117,8 +141,10 @@ export function numberLines(code: string): string {
 const emptyValue = (): EntityValue => ({ scalar: '', items: [], entries: [], rows: [] })
 
 /** Wire reply -> app reply. Drops anything that doesn't fit the code instead of failing. */
-export function fromTraceWire(wire: TraceWireT, code: string): TraceReply {
+export function fromTraceWire(wire: TraceWireT, highlighted: string): TraceReply {
   const message = wire.message.trim()
+  // No highlight (a question about the screen): the code Claude copied from the screenshot.
+  const code = highlighted.trim() ? highlighted : normalizeSnippet(wire.code)
   const lines = code.split('\n')
 
   const entities: TraceEntity[] = []
@@ -145,7 +171,8 @@ export function fromTraceWire(wire: TraceWireT, code: string): TraceReply {
       reads: [...new Set(s.reads.filter((id) => ids.has(id)))],
       updates: s.updates
         .filter((u) => ids.has(u.entity))
-        .map((u) => ({ entity: u.entity, value: { ...emptyValue(), ...u.value } }))
+        .map((u) => ({ entity: u.entity, value: { ...emptyValue(), ...u.value } })),
+      say: s.say.trim()
     })
   }
 
@@ -161,8 +188,22 @@ export function fromTraceWire(wire: TraceWireT, code: string): TraceReply {
   const status = supported && assessment.status === 'matched' && expected === actual ? 'matched'
     : supported && assessment.status === 'mismatch' && expected !== actual ? 'mismatch' : 'unknown'
   const outcome: z.infer<typeof TraceOutcome> = { status, expected, actual, evidence }
-  const trace = entities.length && steps.length && lines.some((l) => l.trim()) ? { language: wire.language.trim(), code, entities, steps, outcome } : null
+  const trace: CodeTrace | null =
+    entities.length && steps.length && lines.some((l) => l.trim())
+      ? withNarration({ intro: wire.intro.trim(), language: wire.language.trim(), code, entities, steps, outcome })
+      : null
   return { message, trace }
+}
+
+/** Every step gets a sentence: Claude's when it wrote one, otherwise one made from the step itself. */
+export function withNarration(trace: CodeTrace, says: string[] = [], intro = ''): CodeTrace {
+  const steps = trace.steps.map((s, i) => ({ ...s, say: (says[i] ?? '').trim() || s.say.trim() }))
+  const filled = { ...trace, steps }
+  return {
+    ...filled,
+    intro: intro.trim() || trace.intro.trim() || 'Let’s run it, one step at a time.',
+    steps: steps.map((s, i) => (s.say ? s : { ...s, say: narrateStep(filled, i).text }))
+  }
 }
 
 function clampInt(v: number, lo: number, hi: number): number {

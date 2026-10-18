@@ -196,3 +196,13 @@ body.mock-desktop {
 .island-fill {
   animation: island-fill 4s linear forwards;
 }
+
+/* The animation's line on top: a little larger, code names stand out but stay calm. */
+.caption-line .md p {
+  margin: 0;
+}
+.caption-line .md code {
+  font-size: 0.9em;
+  background: rgb(255 255 255 / 0.12);
+  color: #fde68a;
+}

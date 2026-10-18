@@ -1,15 +1,17 @@
 // Try "Ask" on highlighted code in the terminal, without Electron: Claude traces the file step by
 // step, exactly what the full-screen animation plays. Good for checking a demo snippet first.
 //
-//   npm run trace -- path/to/code.py           Animate on (max effort, full trace)
+//   npm run trace -- path/to/code.py           Animate on (full trace; Python is run for real)
 //   npm run trace -- path/to/code.py --off     Animate off (text only)
 //   npm run trace -- path/to/code.py --json    print the whole trace as JSON
 //   npm run trace -- path/to/code.py --effort medium   force an effort (low|medium|high|xhigh|max)
+//   npm run trace -- path/to/code.py --no-run  Python too: Claude writes the trace instead of running it
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { CodeTrace, EntityValue } from '../src/shared/trace'
 import { loadEnvFiles } from '../src/main/env'
 import { Tracer, traceEffort, type Effort } from '../src/main/island/tracer'
+import { PythonRunner } from '../src/main/run/python'
 import { createTransport } from '../src/main/tutor/provider'
 
 loadEnvFiles([join(process.cwd(), '.env')])
@@ -34,7 +36,9 @@ const shownEffort = effort ?? traceEffort(snippet)
 console.log(
   `${transport.provider === 'bedrock' ? `Amazon Bedrock (${transport.region})` : 'Claude API'} · ${transport.model} · ${animate ? `Animate on, ${shownEffort} effort` : 'Animate off'}`
 )
-const tracer = new Tracer(transport, (line) => console.log(`  (${line})`), effort)
+// Python highlights run for real (Pyodide), like in the app; --no-run makes Claude write the trace.
+const runner = args.includes('--no-run') ? null : new PythonRunner(join(process.cwd(), 'node_modules', 'pyodide'))
+const tracer = new Tracer(transport, runner, (line: string) => console.log(`  (${line})`), effort)
 try {
   const reply = await tracer.ask({ snippet, image: null, animate })
   console.log(`\n${reply.message}\n`)
@@ -47,6 +51,8 @@ try {
 } catch (err) {
   console.error(`error: ${(err as Error).message}`)
   process.exit(1)
+} finally {
+  runner?.dispose()
 }
 
 function printTrace(trace: CodeTrace): void {
@@ -59,6 +65,7 @@ function printTrace(trace: CodeTrace): void {
     const result = s.result ? ` -> ${s.result}` : ''
     const updates = s.updates.map((u) => `${names.get(u.entity)?.name} = ${show(names.get(u.entity)?.kind, u.value)}`).join(', ')
     console.log(`${String(i + 1).padStart(3)}. L${s.line} ${s.kind.padEnd(9)} ${where}${result}${updates ? `   | ${updates}` : ''}`)
+    console.log(`       "${s.say}"`)
   })
 }
 

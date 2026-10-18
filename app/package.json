@@ -21,6 +21,7 @@
     "@anthropic-ai/bedrock-sdk": "^0.35.0",
     "@anthropic-ai/sdk": "^0.135.0",
     "mathjs": "^15.2.0",
+    "pyodide": "^314.0.7",
     "ts-fsrs": "^5.4.2",
     "uiohook-napi": "^1.5.5",
     "zod": "^4.6.7"

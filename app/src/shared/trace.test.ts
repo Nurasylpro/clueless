@@ -26,6 +26,9 @@ describe('fromTraceWire', () => {
   const code = 'n = 5\nwhile n > 0:\n    n -= 1'
   const wire: TraceWireT = {
     message: 'Watch `n` count down.',
+    intro: 'Let us count down.',
+    code: '',
+    run: { setup: '', call: '' },
     language: 'python',
     outcome: { status: 'unknown', expected: '', actual: '', evidence: '' },
     entities: [
@@ -33,9 +36,9 @@ describe('fromTraceWire', () => {
       { id: 'n', name: 'dup', kind: 'value', indexOf: '' }
     ],
     steps: [
-      { line: 1, endLine: 1, focus: 'n = 5', kind: 'declare', result: '', reads: [], updates: [{ entity: 'n', value: value({ scalar: '5' }) }] },
-      { line: 2, endLine: 0, focus: 'n > 0', kind: 'condition', result: 'true', reads: ['n', 'ghost'], updates: [] },
-      { line: 99, endLine: 99, focus: 'not on the line', kind: 'assign', result: '', reads: [], updates: [{ entity: 'ghost', value: value() }] }
+      { line: 1, endLine: 1, focus: 'n = 5', kind: 'declare', result: '', reads: [], updates: [{ entity: 'n', value: value({ scalar: '5' }) }], say: '' },
+      { line: 2, endLine: 0, focus: 'n > 0', kind: 'condition', result: 'true', reads: ['n', 'ghost'], updates: [], say: '' },
+      { line: 99, endLine: 99, focus: 'not on the line', kind: 'assign', result: '', reads: [], updates: [{ entity: 'ghost', value: value() }], say: '' }
     ]
   }
 
@@ -45,6 +48,9 @@ describe('fromTraceWire', () => {
     expect(trace?.entities).toEqual([{ id: 'n', name: 'n', kind: 'value', indexOf: null }])
     expect(trace?.steps[1]).toMatchObject({ line: 2, endLine: 2, focus: 'n > 0', reads: ['n'] })
     expect(trace?.steps[2]).toMatchObject({ line: 3, endLine: 3, focus: '', updates: [] })
+    // No sentence from Claude: the app makes one from the step itself.
+    expect(trace?.steps[2].say).toBe('n -= 1')
+    expect(trace?.intro).toBe('Let us count down.')
   })
 
   it('has no trace when there are no steps (Animate off, or not code)', () => {

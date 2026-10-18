@@ -1,21 +1,27 @@
-// Clueless main process. Runs in the background; Ctrl/Cmd+Shift+2 shows the island (a pill at the
-// top of the screen). While it shows, highlighting text anywhere brings up an Ask button next to
-// the cursor. Ask -> Claude reads the highlight (and the screen) -> a short text in the island ->
-// with Animate on, 4 s later the island fills the screen and animates the code step by step.
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, screen, type Display, type Rectangle } from 'electron'
+// Clueless main process. Runs in the background as a small island (a pill at the top of the
+// screen): Ctrl/Cmd+Shift+2 shows or hides it, Ctrl/Cmd+Shift+1 starts the mic.
+// While it shows, highlighting text anywhere brings up an Ask button next to the cursor.
+// Ask (or a question typed / said in the island) -> Claude reads it and the screen ->
+// Animate on and code: the island fills the screen and plays the code step by step, each step
+// shown in one line on top (and read aloud with Voice on). Otherwise the answer opens in the card.
+import { app, BrowserWindow, globalShortcut, ipcMain, Menu, screen, systemPreferences, type Display, type Rectangle } from 'electron'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { ISLAND_IPC, type IslandView } from '../shared/contracts'
+import { join, sep } from 'node:path'
+import { IPC, ISLAND_IPC, type IslandView } from '../shared/contracts'
 import { IslandController, type ScreenImage } from '../shared/islandController'
 import { activeDisplay, captureDisplay, toModelImage } from './capture/capture'
 import { loadEnvFiles } from './env'
 import { SelectionWatcher, type Point } from './island/selection'
 import { Tracer } from './island/tracer'
+import { PythonRunner } from './run/python'
 import { createTransport } from './tutor/provider'
+import { VoiceManager, type SocketLike } from './voice/deepgram'
+import { ElevenLabs } from './voice/elevenlabs'
 import { createTray } from './windows/tray'
 import { createAskButton, createIsland, placeAskButton, placeIsland, type IslandMode } from './windows/windows'
 
-const HOTKEY = 'CommandOrControl+Shift+2'
+const HOTKEY = 'CommandOrControl+Shift+2' // show / hide the island
+const MIC_HOTKEY = 'CommandOrControl+Shift+1' // start (or stop) talking
 const ASK_BUTTON_MS = 4000
 const SMOKE = process.env.CLUELESS_SMOKE === '1'
 
@@ -26,6 +32,7 @@ let islandMode: IslandMode = 'pill'
 let contentSize = { width: 320, height: 64 } // what the island's UI measured for the pill / card
 let pendingSnippet: string | null = null
 let askTimer: NodeJS.Timeout | null = null
+let runner: PythonRunner | null = null
 
 const log = (line: string): void => console.log(`[clueless] ${line}`)
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
@@ -36,17 +43,27 @@ function loadKeys(): void {
   loadEnvFiles([join(process.cwd(), '.env'), join(app.getAppPath(), '.env'), join(app.getPath('userData'), '.env')])
 }
 
+function toIsland(channel: string, payload: unknown): void {
+  if (island && !island.isDestroyed()) island.webContents.send(channel, payload)
+}
+
+/** Runs Python highlights (Pyodide). Unpacked from the asar in the built app, since it reads its own files. */
+function pythonRunner(): PythonRunner {
+  runner ??= new PythonRunner(join(app.getAppPath(), 'node_modules', 'pyodide').replace(`app.asar${sep}`, `app.asar.unpacked${sep}`))
+  return runner
+}
+
 // ---------- the controller ----------
 
 const controller = new IslandController({
   makeTracer: () => {
     loadKeys() // pick up a key added since launch
     const transport = createTransport()
-    return transport ? new Tracer(transport, log) : null
+    return transport ? new Tracer(transport, pythonRunner(), log) : null
   },
   capture: captureForClaude,
   emit: (view) => {
-    if (island && !island.isDestroyed()) island.webContents.send(ISLAND_IPC.view, view)
+    toIsland(ISLAND_IPC.view, view)
     applyMode(modeFor(view))
   },
   schedule: (fn, ms) => {
@@ -57,7 +74,7 @@ const controller = new IslandController({
 })
 
 function modeFor(view: IslandView): IslandMode {
-  return view.phase === 'playing' ? 'full' : view.phase === 'idle' ? 'pill' : 'card'
+  return view.phase === 'playing' ? 'full' : view.expanded ? 'card' : 'pill'
 }
 
 function applyMode(mode: IslandMode): void {
@@ -65,7 +82,7 @@ function applyMode(mode: IslandMode): void {
   const wasFull = islandMode === 'full'
   islandMode = mode
   placeIsland(island, islandDisplay, mode, contentSize)
-  if (mode === 'full' && !wasFull) island.focus() // so Esc reaches the animation
+  if (mode === 'full' && !wasFull) island.focus() // so Space, ← and Esc reach the animation
 }
 
 /** A screenshot of the display the student is working on, with Clueless's own windows hidden. */
@@ -148,13 +165,44 @@ function showIsland(): void {
 function hideIsland(): void {
   watcher.stop()
   hideAskButton()
-  controller.closeCard()
-  island?.hide()
+  voice.cancelAll()
+  controller.hide()
+  island?.hide() // the UI notices it's hidden and stops talking
 }
 
 function toggleIsland(): void {
   if (island?.isVisible()) hideIsland()
   else showIsland()
+}
+
+// ---------- voice: talking (Deepgram) and being read to (ElevenLabs, or the computer's voice) ----------
+
+const voice = new VoiceManager({
+  apiKey: () => {
+    loadKeys() // pick up a key added since launch
+    return process.env.DEEPGRAM_API_KEY?.trim() || undefined
+  },
+  events: {
+    transcript: (t) => toIsland(IPC.voiceTranscript, t),
+    state: (e) => toIsland(IPC.voiceState, e)
+  },
+  // Node's built-in WebSocket (no extra package).
+  makeSocket: (url, protocols) => new WebSocket(url, protocols) as unknown as SocketLike
+})
+
+const elevenLabs = new ElevenLabs(
+  () => {
+    loadKeys()
+    return process.env
+  },
+  fetch,
+  log
+)
+
+/** The mic hotkey: bring the island up if it's hidden, then start (or stop) listening. */
+function onMicHotkey(): void {
+  if (!island?.isVisible()) showIsland()
+  toIsland(ISLAND_IPC.micToggle, null)
 }
 
 // ---------- wiring ----------
@@ -165,19 +213,20 @@ function setup(): void {
   loadKeys()
   // An overlay, not a regular app: no dock icon on macOS (the menu-bar icon replaces it).
   if (process.platform === 'darwin') app.dock?.hide()
-  // Copy, paste and select all in the follow-up box come from the Edit menu's roles.
+  // Copy, paste and select all in the island's text box come from the Edit menu's roles.
   Menu.setApplicationMenu(
     Menu.buildFromTemplate(process.platform === 'darwin' ? [{ role: 'appMenu' }, { role: 'editMenu' }] : [{ role: 'editMenu' }])
   )
 
   ipcMain.handle(ISLAND_IPC.getView, () => controller.current)
   ipcMain.on(ISLAND_IPC.setAnimate, (_e, on: unknown) => controller.setAnimate(Boolean(on)))
-  ipcMain.on(ISLAND_IPC.followUp, (_e, text: unknown) => {
-    if (typeof text === 'string') void controller.followUp(text.slice(0, 2000))
+  ipcMain.on(ISLAND_IPC.setVoice, (_e, on: unknown) => controller.setVoice(Boolean(on)))
+  ipcMain.on(ISLAND_IPC.setExpanded, (_e, open: unknown) => controller.setExpanded(Boolean(open)))
+  ipcMain.on(ISLAND_IPC.askText, (_e, text: unknown) => {
+    if (typeof text === 'string') void controller.askText(text.slice(0, 2000))
   })
-  ipcMain.on(ISLAND_IPC.closeCard, () => controller.closeCard())
+  ipcMain.on(ISLAND_IPC.replay, () => controller.replay())
   ipcMain.on(ISLAND_IPC.finish, () => controller.finishAnimation())
-  ipcMain.on(ISLAND_IPC.hide, () => hideIsland())
   ipcMain.on(ISLAND_IPC.hold, (_e, hold: unknown) => controller.holdCard(Boolean(hold)))
   ipcMain.on(ISLAND_IPC.ask, () => onAsk())
   ipcMain.on(ISLAND_IPC.resize, (_e, size: { width: number; height: number }) => {
@@ -186,9 +235,29 @@ function setup(): void {
     if (island && islandMode !== 'full') placeIsland(island, islandDisplay, islandMode, contentSize)
   })
 
+  ipcMain.handle(IPC.voiceMicAccess, async () => {
+    // macOS asks the student once; Windows uses its own privacy setting and Chromium handles it.
+    if (process.platform !== 'darwin') return true
+    if (systemPreferences.getMediaAccessStatus('microphone') === 'granted') return true
+    return systemPreferences.askForMediaAccess('microphone')
+  })
+  ipcMain.handle(IPC.voiceTts, (_e, req: unknown) => elevenLabs.speak(req))
+  ipcMain.on(IPC.voiceStart, (_e, id: unknown) => voice.start(id))
+  ipcMain.on(IPC.voiceAudio, (_e, arg: { id?: unknown; chunk?: unknown }) => voice.audio(arg?.id, arg?.chunk))
+  ipcMain.on(IPC.voiceStop, (_e, id: unknown) => voice.stop(id))
+  ipcMain.on(IPC.voiceCancel, (_e, id: unknown) => voice.cancel(id))
+
   islandDisplay = activeDisplay()
   island = createIsland()
-  island.on('closed', () => (island = null))
+  island.on('closed', () => {
+    voice.cancelAll()
+    island = null
+  })
+  // A reload (or crash) of the UI drops its recorder: close the Deepgram side too.
+  island.webContents.on('did-start-navigation', (_e, _url, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) voice.cancelAll()
+  })
+  island.webContents.on('render-process-gone', () => voice.cancelAll())
   askButton = createAskButton()
   keepAlive.push(createTray({ toggle: toggleIsland, quit: () => app.quit(), hotkey: HOTKEY }))
 
@@ -203,9 +272,11 @@ function setup(): void {
     return
   }
 
+  pythonRunner().warm() // load Python in the background, so the first run is quick
   island.once('ready-to-show', () => showIsland())
   if (!globalShortcut.register(HOTKEY, toggleIsland)) log(`${HOTKEY} is taken by another app`)
-  log(`ready. Show / hide the island: ${HOTKEY}`)
+  if (!globalShortcut.register(MIC_HOTKEY, onMicHotkey)) log(`${MIC_HOTKEY} is taken by another app`)
+  log(`ready. Show / hide the island: ${HOTKEY}   Talk: ${MIC_HOTKEY}`)
 }
 
 // Smoke runs use their own data folder, so they don't collide with a running copy.
@@ -220,5 +291,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('will-quit', () => {
     globalShortcut.unregisterAll()
     watcher.stop()
+    voice.cancelAll()
+    runner?.dispose()
   })
 }

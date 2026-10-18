@@ -1,6 +1,10 @@
-// "Ask" on highlighted text: one conversation with Claude per highlight. With Animate on it runs
-// at max effort and comes back with a full step-by-step trace of the code. No Electron imports,
-// so scripts/try-trace.mts and the tests use it directly.
+// "Ask" on highlighted text (or a typed / spoken question): one conversation with Claude.
+// - Animate off, or not code: Claude explains it in text.
+// - Animate on, Python: Claude picks an input and how to call the code, the app runs it for real
+//   (src/main/run) to get every step, then Claude writes the words for the steps (one line each,
+//   shown on top and read aloud). If the run can't start, Claude writes the trace itself.
+// - Animate on, other languages: Claude writes the step-by-step trace, words included.
+// No Electron imports, so scripts/try-trace.mts and the tests use it directly.
 import Anthropic, { BetaFallbackState } from '@anthropic-ai/sdk'
 import type {
   BetaContentBlockParam,
@@ -8,10 +12,23 @@ import type {
   BetaMessageParam
 } from '@anthropic-ai/sdk/resources/beta/messages/messages'
 import { z } from 'zod'
-import { fromTraceWire, normalizeSnippet, numberLines, TraceWire, type TraceReply } from '../../shared/trace'
+import type { AskInput, ScreenQuestion, TracerLike } from '../../shared/islandController'
+import {
+  fromTraceWire,
+  NarrationWire,
+  normalizeSnippet,
+  numberLines,
+  TraceWire,
+  withNarration,
+  type CodeTrace,
+  type EntityValue,
+  type NarrationWireT,
+  type TraceReply,
+  type TraceWireT
+} from '../../shared/trace'
+import { looksLikePython, toCodeTrace, type PythonRunner } from '../run/python'
 import { errorMessage, TutorError, type ImageInput, type TutorTransport } from '../tutor/tutor'
-import type { AskInput, TracerLike } from '../../shared/islandController'
-import { TRACE_PROMPT } from './prompt'
+import { NARRATE_PROMPT, TRACE_PROMPT } from './prompt'
 
 /** Room for long traces; streaming keeps a long answer from hitting an HTTP timeout. */
 const MAX_TOKENS = 64000
@@ -20,20 +37,22 @@ const MAX_TOKENS = 64000
  *  (Measured on bubble sort: medium and high ~16 s, max ~88 s.) */
 export const TRACE_TIMEOUT_MS = 150_000
 
-export const traceSchema = (() => {
-  const schema = JSON.parse(JSON.stringify(z.toJSONSchema(TraceWire)).replaceAll('"oneOf"', '"anyOf"'))
-  delete schema.$schema
-  return schema as Record<string, unknown>
-})()
+/** The words for a recorded run are a nice-to-have: past this, the app writes them itself. */
+export const NARRATE_TIMEOUT_MS = 30_000
 
-const REPLY_TOOL = {
-  name: 'reply',
-  description: 'Send your reply to the student. Call this exactly once, with every field filled.',
-  input_schema: traceSchema
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+function jsonSchema(schema: z.ZodType): Record<string, unknown> {
+  const json = JSON.parse(JSON.stringify(z.toJSONSchema(schema)).replaceAll('"oneOf"', '"anyOf"'))
+  delete json.$schema
+  return json as Record<string, unknown>
 }
 
-const TOOL_MODE_RULES =
-  '\n\n# How to answer\nAlways answer by calling the `reply` tool exactly once, with every field filled. Write nothing outside the tool call.'
+export const traceSchema = jsonSchema(TraceWire)
+export const narrationSchema = jsonSchema(NarrationWire)
+
+const toolModeRules = (tool: string): string =>
+  `\n\n# How to answer\nAlways answer by calling the \`${tool}\` tool exactly once, with every field filled. Write nothing outside the tool call.`
 
 /** The streaming slice of an Anthropic or AnthropicBedrockMantle client. */
 interface StreamingClient {
@@ -47,53 +66,41 @@ interface StreamingClient {
   }
 }
 
-export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
-
 interface Turn {
   text: string
   images?: ImageInput[]
   toolError?: string
 }
 
-export class Tracer implements TracerLike {
-  /** The whole conversation about this highlight. Append-only. */
+interface ReplySpec<T> {
+  system: string
+  schema: z.ZodType<T>
+  json: Record<string, unknown>
+  tool: string // the tool Claude answers through on Bedrock (no structured outputs there)
+  timeoutMs: number
+}
+
+const TRACE_SPEC: ReplySpec<TraceWireT> = { system: TRACE_PROMPT, schema: TraceWire, json: traceSchema, tool: 'reply', timeoutMs: TRACE_TIMEOUT_MS }
+const NARRATE_SPEC: ReplySpec<NarrationWireT> = { system: NARRATE_PROMPT, schema: NarrationWire, json: narrationSchema, tool: 'narrate', timeoutMs: NARRATE_TIMEOUT_MS }
+
+/** One conversation with Claude whose every reply has the same shape. Append-only. */
+class Conversation<T> {
   readonly messages: BetaMessageParam[] = []
   private readonly fallbackState = new BetaFallbackState()
   private pendingToolUseId: string | null = null
-  private code = ''
   private client: StreamingClient
   private useServerFallbacks: boolean
 
   constructor(
     private readonly transport: TutorTransport,
-    private readonly log: (line: string) => void = () => {},
-    /** Force one effort level for animations (tests, `npm run trace --effort`); undefined = pick by code size. */
-    private readonly effortOverride: Effort | undefined = envEffort()
+    private readonly spec: ReplySpec<T>,
+    private readonly log: (line: string) => void
   ) {
     this.client = transport.client as unknown as StreamingClient
     this.useServerFallbacks = transport.serverFallbacks
   }
 
-  ask(input: AskInput): Promise<TraceReply> {
-    this.code = normalizeSnippet(input.snippet)
-    const text = [
-      input.animate ? '[ANIMATE ON]' : '[ANIMATE OFF]',
-      'The student highlighted this:',
-      numberLines(this.code)
-    ].join('\n')
-    return this.request({ text, images: input.image ? [input.image] : [] }, this.effortFor(input.animate, this.code))
-  }
-
-  followUp(text: string, animate: boolean): Promise<TraceReply> {
-    return this.request({ text: `${animate ? '[ANIMATE ON]' : '[ANIMATE OFF]'} [FOLLOW-UP] ${text}` }, this.effortFor(animate, this.code))
-  }
-
-  private effortFor(animate: boolean, code: string): Effort {
-    if (this.effortOverride) return this.effortOverride
-    return animate ? traceEffort(code) : 'medium'
-  }
-
-  private async request(turn: Turn, effort: Effort, retries = 1): Promise<TraceReply> {
+  async request(turn: Turn, effort: Effort, retries = 1): Promise<T> {
     this.messages.push(this.userMessage(turn))
     const started = Date.now()
     let response: BetaMessage
@@ -103,7 +110,7 @@ export class Tracer implements TracerLike {
       this.messages.pop() // keep the conversation alternating user/assistant
       if (err instanceof TutorError) throw err
       if (err instanceof Anthropic.APIUserAbortError) {
-        throw new TutorError(`That took longer than ${TRACE_TIMEOUT_MS / 1000} s, so I stopped. Try highlighting less code.`, 'api')
+        throw new TutorError(`That took longer than ${Math.round(this.spec.timeoutMs / 1000)} s, so I stopped. Try highlighting less code.`, 'api')
       }
       throw new TutorError(errorMessage(err), 'api')
     }
@@ -111,7 +118,7 @@ export class Tracer implements TracerLike {
     this.pendingToolUseId = null
     this.messages.push({ role: 'assistant', content: response.content as unknown as BetaContentBlockParam[] })
     const u = response.usage
-    this.log(`trace: ${effort} ${Date.now() - started}ms in=${u.input_tokens} cached=${u.cache_read_input_tokens ?? 0} out=${u.output_tokens}`)
+    this.log(`${this.spec.tool}: ${effort} ${Date.now() - started}ms in=${u.input_tokens} cached=${u.cache_read_input_tokens ?? 0} out=${u.output_tokens}`)
 
     if (response.stop_reason === 'refusal') throw new TutorError("Clueless can't help with this one.", 'refusal')
     if (response.stop_reason === 'max_tokens') throw new TutorError('The answer was too long and got cut off. Try a shorter highlight.', 'max_tokens')
@@ -124,24 +131,28 @@ export class Tracer implements TracerLike {
       } catch {
         throw new TutorError('Clueless got a garbled reply. Try again.', 'bad_output')
       }
-      const parsed = TraceWire.safeParse(json)
+      const parsed = this.spec.schema.safeParse(json)
       if (!parsed.success) throw new TutorError('Clueless got an unexpected reply. Try again.', 'bad_output')
-      return fromTraceWire(parsed.data, this.code)
+      return parsed.data
     }
 
-    // Bedrock: the reply is the `reply` tool's input. One retry if it's missing or malformed.
-    const call = response.content.find((b) => b.type === 'tool_use' && b.name === REPLY_TOOL.name)
+    // Bedrock: the reply is the tool's input. One retry if it's missing or malformed.
+    const call = response.content.find((b) => b.type === 'tool_use' && b.name === this.spec.tool)
     if (call && call.type === 'tool_use') {
       this.pendingToolUseId = call.id
-      const parsed = TraceWire.safeParse(call.input)
-      if (parsed.success) return fromTraceWire(parsed.data, this.code)
+      const parsed = this.spec.schema.safeParse(call.input)
+      if (parsed.success) return parsed.data
       if (retries > 0) {
         const problems = parsed.error.issues.slice(0, 6).map((i) => `${i.path.join('.')}: ${i.message}`).join('; ')
-        this.log(`trace: reply didn't match the schema (${problems}), asking again`)
-        return this.request({ text: '', toolError: `That reply didn't match the schema (${problems}). Call reply again with every field filled.` }, effort, retries - 1)
+        this.log(`${this.spec.tool}: reply didn't match the schema (${problems}), asking again`)
+        return this.request(
+          { text: '', toolError: `That reply didn't match the schema (${problems}). Call ${this.spec.tool} again with every field filled.` },
+          effort,
+          retries - 1
+        )
       }
     } else if (retries > 0) {
-      return this.request({ text: '[FORMAT] Answer by calling the reply tool.' }, effort, retries - 1)
+      return this.request({ text: `[FORMAT] Answer by calling the ${this.spec.tool} tool.` }, effort, retries - 1)
     }
     throw new TutorError('Clueless got an unexpected reply. Try again.', 'bad_output')
   }
@@ -165,22 +176,23 @@ export class Tracer implements TracerLike {
 
   private async send(effort: Effort): Promise<BetaMessage> {
     const structured = this.transport.mode === 'structured'
+    const system = structured ? this.spec.system : this.spec.system + toolModeRules(this.spec.tool)
     const params: Record<string, unknown> = {
       model: this.transport.model,
       max_tokens: MAX_TOKENS,
-      system: [{ type: 'text', text: structured ? TRACE_PROMPT : TRACE_PROMPT + TOOL_MODE_RULES, cache_control: { type: 'ephemeral' } }],
+      system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }],
       messages: this.messages,
-      output_config: structured ? { effort, format: { type: 'json_schema', schema: traceSchema } } : { effort }
+      output_config: structured ? { effort, format: { type: 'json_schema', schema: this.spec.json } } : { effort }
     }
     if (!structured) {
-      params.tools = [REPLY_TOOL]
+      params.tools = [{ name: this.spec.tool, description: 'Send your reply. Call this exactly once, with every field filled.', input_schema: this.spec.json }]
       params.tool_choice = { type: 'auto' } // forced tool use isn't allowed on Opus 5.5; the prompt asks for it
     }
     return this.stream(params)
   }
 
   private async stream(params: Record<string, unknown>): Promise<BetaMessage> {
-    const options = { fallbackState: this.fallbackState, signal: AbortSignal.timeout(TRACE_TIMEOUT_MS) }
+    const options = { fallbackState: this.fallbackState, signal: AbortSignal.timeout(this.spec.timeoutMs) }
     try {
       if (this.useServerFallbacks) {
         // If a safety classifier declines, the API re-runs the request on a fallback model.
@@ -192,10 +204,10 @@ export class Tracer implements TracerLike {
     } catch (err) {
       if (!(err instanceof Anthropic.BadRequestError) || !/fallback|beta|credit/i.test(err.message)) throw err
       if (this.useServerFallbacks) {
-        this.log('trace: server-side fallbacks not available, continuing without them')
+        this.log(`${this.spec.tool}: server-side fallbacks not available, continuing without them`)
         this.useServerFallbacks = false
       } else if (this.transport.plainClient && this.client !== (this.transport.plainClient as unknown)) {
-        this.log('trace: refusal-fallback middleware not available here, continuing without it')
+        this.log(`${this.spec.tool}: refusal-fallback middleware not available here, continuing without it`)
         this.client = this.transport.plainClient as unknown as StreamingClient
       } else {
         throw err
@@ -205,9 +217,148 @@ export class Tracer implements TracerLike {
   }
 }
 
+export class Tracer implements TracerLike {
+  private conv: Conversation<TraceWireT> | null = null
+  private code = '' // what the conversation is about: the highlight, or code Claude copied from the screen
+
+  constructor(
+    private readonly transport: TutorTransport,
+    /** Runs Python highlights for exact values; null = Claude writes every trace. */
+    private readonly runner: PythonRunner | null = null,
+    private readonly log: (line: string) => void = () => {},
+    /** Force one effort level for written traces (tests, `npm run trace --effort`); undefined = pick by code size. */
+    private readonly effortOverride: Effort | undefined = envEffort()
+  ) {}
+
+  /** The conversation so far (for tests and scripts). */
+  get messages(): BetaMessageParam[] {
+    return this.conv?.messages ?? []
+  }
+
+  async ask(input: AskInput): Promise<TraceReply> {
+    this.code = normalizeSnippet(input.snippet)
+    const conv = (this.conv = this.newConversation())
+    const highlight = `The student highlighted this:\n${numberLines(this.code)}`
+    const images = input.image ? [input.image] : []
+
+    if (input.animate && this.runner && looksLikePython(this.code)) {
+      const plan = await conv.request({ text: `[ANIMATE ON] [RUN]\n${highlight}`, images }, 'low')
+      const ran = await this.runPlan(plan)
+      if (ran) return ran
+      this.log('ask: the run did not work, Claude writes the trace instead')
+      return fromTraceWire(await conv.request({ text: '[WRITE IT]' }, this.effortFor(this.code)), this.code)
+    }
+    const tag = input.animate ? '[ANIMATE ON]' : '[ANIMATE OFF]'
+    const effort = input.animate ? this.effortFor(this.code) : 'medium'
+    return fromTraceWire(await conv.request({ text: `${tag}\n${highlight}`, images }, effort), this.code)
+  }
+
+  async askScreen(input: ScreenQuestion): Promise<TraceReply> {
+    this.code = ''
+    const conv = (this.conv = this.newConversation())
+    const tag = input.animate ? '[ANIMATE ON] [SCREEN]' : '[ANIMATE OFF] [SCREEN]'
+    const images = input.image ? [input.image] : []
+    const reply = fromTraceWire(await conv.request({ text: `${tag} ${input.question}`, images }, 'medium'), '')
+    if (reply.trace) this.code = reply.trace.code // follow-ups are about the code it animated
+    return reply
+  }
+
+  async followUp(text: string, animate: boolean): Promise<TraceReply> {
+    const conv = this.conv
+    if (!conv) throw new TutorError('Ask about a highlight first.', 'api')
+    if (animate && this.runner && this.code && looksLikePython(this.code)) {
+      const plan = await conv.request({ text: `[ANIMATE ON] [RUN] [FOLLOW-UP] ${text}` }, 'low')
+      const wantsRun = Boolean(plan.run.setup.trim() || plan.run.call.trim())
+      return (wantsRun && (await this.runPlan(plan))) || { message: plan.message.trim(), trace: null }
+    }
+    const tag = animate ? '[ANIMATE ON] [FOLLOW-UP]' : '[ANIMATE OFF] [FOLLOW-UP]'
+    const effort = animate && this.code ? this.effortFor(this.code) : 'medium'
+    const reply = fromTraceWire(await conv.request({ text: `${tag} ${text}` }, effort), this.code)
+    if (reply.trace && !this.code) this.code = reply.trace.code
+    return reply
+  }
+
+  private newConversation(): Conversation<TraceWireT> {
+    return new Conversation(this.transport, TRACE_SPEC, this.log)
+  }
+
+  /** Run the code with Claude's inputs, then get the words. One retry with the error if it won't start. */
+  private async runPlan(plan: TraceWireT, retries = 1): Promise<TraceReply | null> {
+    if (!this.runner || !this.conv || (plan.language && plan.language.toLowerCase() !== 'python')) return null
+    let why: string
+    try {
+      const run = await this.runner.trace(this.code, plan.run)
+      const trace = run.setupError ? null : toCodeTrace(run, this.code)
+      if (trace) {
+        const notes = [run.stopped && `stopped at the ${run.stopped} limit`, run.error].filter(Boolean).join(', ')
+        this.log(`run: ${trace.steps.length} steps${notes ? ` (${notes})` : ''}`)
+        return this.narrate(trace, plan)
+      }
+      why = run.setupError || run.error || 'nothing in the highlighted code ran'
+    } catch (err) {
+      this.log(`run: ${(err as Error).message}`)
+      return null
+    }
+    this.log(`run: failed (${why})`)
+    if (retries <= 0) return null
+    return this.runPlan(await this.conv.request({ text: `[RUN FAILED] ${why}` }, 'low'), retries - 1)
+  }
+
+  /** The app recorded the steps; Claude writes one line per step, the intro and the recap.
+   *  If that fails, the app writes the lines itself so the animation still plays. */
+  private async narrate(trace: CodeTrace, plan: TraceWireT): Promise<TraceReply> {
+    try {
+      const conv = new Conversation(this.transport, NARRATE_SPEC, this.log)
+      const words = await conv.request({ text: describeRun(trace, plan.intro) }, 'low')
+      if (words.says.length !== trace.steps.length) this.log(`narrate: ${words.says.length} lines for ${trace.steps.length} steps, filling the gaps`)
+      return {
+        message: words.message.trim() || plan.message.trim(),
+        trace: withNarration(trace, words.says, words.intro || plan.intro)
+      }
+    } catch (err) {
+      this.log(`narrate: ${(err as Error).message}; the app writes the lines`)
+      return { message: plan.message.trim(), trace: withNarration(trace, [], plan.intro) }
+    }
+  }
+
+  private effortFor(code: string): Effort {
+    return this.effortOverride ?? traceEffort(code)
+  }
+}
+
+/** The recorded run, compactly, for [NARRATE]. */
+function describeRun(trace: CodeTrace, intro: string): string {
+  const names = new Map(trace.entities.map((e) => [e.id, e]))
+  const show = (id: string, v: EntityValue): string => {
+    const kind = names.get(id)?.kind
+    const name = names.get(id)?.name ?? id
+    if (kind === 'value') return `${name} = ${v.scalar}`
+    if (kind === 'map') return `${name} = {${v.entries.map((e) => `${e.key}: ${e.value}`).join(', ')}}`
+    if (kind === 'grid') return `${name} = [${v.rows.map((r) => `[${r.join(', ')}]`).join(', ')}]`
+    if (kind === 'set') return `${name} = {${v.items.join(', ')}}`
+    return `${name} = [${v.items.join(', ')}]`
+  }
+  const steps = trace.steps.map((s, i) => {
+    const what = s.focus || trace.code.split('\n')[s.line - 1]?.trim() || ''
+    const result = s.result ? ` -> ${s.result}` : ''
+    const updates = s.updates.length ? ` | ${s.updates.map((u) => show(u.entity, u.value)).join('; ')}` : ''
+    return `${i + 1}. line ${s.line}, ${s.kind}: ${what}${result}${updates}`
+  })
+  return [
+    'The code:',
+    numberLines(trace.code),
+    '',
+    intro ? `The input you chose earlier: ${intro}` : '',
+    `The ${trace.steps.length} recorded steps, in order (write exactly ${trace.steps.length} "says"):`,
+    ...steps
+  ]
+    .filter((l, i, all) => l || all[i - 1])
+    .join('\n')
+}
+
 const EFFORTS: Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 
-/** CLUELESS_TRACE_EFFORT=max (in .env) forces one effort level for every animation. */
+/** CLUELESS_TRACE_EFFORT=max (in .env) forces one effort level for every written trace. */
 function envEffort(env: Record<string, string | undefined> = process.env): Effort | undefined {
   const value = env.CLUELESS_TRACE_EFFORT?.trim().toLowerCase()
   return EFFORTS.find((e) => e === value)
@@ -217,5 +368,5 @@ function envEffort(env: Record<string, string | undefined> = process.env): Effor
  *  traced it correctly; max took ~88 s for a few extra "loop finished" steps. So max is opt-in only. */
 export function traceEffort(code: string): Effort {
   const lines = code.split(String.fromCharCode(10)).filter((l) => l.trim()).length
-  return lines <= 8 ? 'medium' : 'high'
+  return lines <= 14 ? 'medium' : 'high'
 }
