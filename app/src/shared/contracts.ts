@@ -67,7 +67,40 @@ export interface TutorReplyT {
 export type ProblemView = Omit<ProblemInfo, 'hiddenSolution'>
 
 /** A tutor turn as shown in the UI: the answer-check reference is stripped out. */
-export type TurnView = Omit<TutorTurn, 'check'> & { checkKind: AnswerCheck['kind'] | null }
+export type TurnView = Omit<TutorTurn, 'check'> & {
+  checkKind: AnswerCheck['kind'] | null
+  animation: TurnAnimation | null // set when the student asked for this turn with an animate button
+}
+
+// ---------- animation ----------
+
+/** What the student asked to animate (the Animate button's three options). */
+export type AnimateTarget = 'code' | 'problem' | 'question'
+
+/** A box the student dragged on one display. rect is in DIP, relative to the display's top-left. */
+export interface ScreenArea {
+  displayId: number
+  rect: Rect
+}
+
+/** How a turn's visual plays. 'code' with an area draws over the student's code on screen;
+ *  everything else plays inside the panel (explain mode). */
+export interface TurnAnimation {
+  target: AnimateTarget
+  area: ScreenArea | null
+}
+
+/** UI -> main: play a visual over the student's code. `nonce` changes on every replay. */
+export interface StagePlay {
+  visual: Visual
+  area: ScreenArea
+  nonce: number
+}
+
+/** main -> stage window: what to draw. `avoid` is the panel, in the same display coordinates. */
+export interface StageShow extends StagePlay {
+  avoid: Rect | null
+}
 
 export interface CheckResult {
   status: 'match' | 'mismatch' | 'missing_units' | 'wrong_units' | 'unparseable'
@@ -124,11 +157,15 @@ export type UserAction =
   | 'finish'
   | 'new'
   | 'retry'
+  | 'animate_code'
+  | 'animate_problem'
+  | 'animate_question'
 
 /** The student clicked a plan step: stuck on the current one, back to a done one, or "I've done this" on a locked one. */
 export type StepIntent = 'stuck' | 'revisit' | 'claim'
 
-export type WindowMode = 'compact' | 'expanded'
+/** 'wide' = expanded with the animation pane next to the conversation (explain mode). */
+export type WindowMode = 'compact' | 'expanded' | 'wide'
 
 export interface AppStatus {
   platform: string
@@ -205,6 +242,10 @@ export const IPC = {
   getSession: 'session:get',
   getMemory: 'memory:get',
   rateCard: 'memory:rate', // { id, rating } -> MemoryView
+  // Code-mode animation: a click-through window over the student's code
+  stagePlay: 'stage:play', // UI -> main: StagePlay
+  stageStop: 'stage:stop', // UI -> main
+  stageShow: 'stage:show', // main -> stage window: StageShow | null
   // Voice: one recording ("utterance") at a time, identified by an id the UI makes up
   voiceToggle: 'voice:toggle', // main -> UI: the voice hotkey was pressed
   voiceStart: 'voice:start', // UI -> main: utterance id
@@ -277,6 +318,9 @@ export interface CluelessApi {
   onVoiceState(cb: (e: VoiceStateEvent) => void): () => void
   onVoiceToggle(cb: () => void): () => void
   tts(req: TtsRequest): Promise<TtsResult>
+  playOnScreen(play: StagePlay): void
+  stopOnScreen(): void
+  onStage(cb: (show: StageShow | null) => void): () => void
 }
 
 // ---------- the island (the floating pill: highlight -> Ask -> text, then the animation) ----------

@@ -57,7 +57,7 @@ const DARK = 'border border-white/10 bg-zinc-900/90 shadow-[0_12px_40px_rgba(0,0
 function Pill({ view }: { view: IslandView }) {
   return (
     <div className={cx('flex h-12 items-center gap-1.5 rounded-full pl-1.5 pr-1.5', DARK)}>
-      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-400 text-zinc-950" title="Clueless">
+      <div className="flex h-9 w-9 items-center justify-center rounded-full bg-claude-500 text-white" title="Clueless">
         <Logo size={19} />
       </div>
       <button
@@ -69,7 +69,7 @@ function Pill({ view }: { view: IslandView }) {
         className="flex h-9 items-center gap-2 rounded-full bg-white/[0.07] px-3 text-[13px] font-medium hover:bg-white/[0.12]"
       >
         Animate
-        <span className={cx('relative h-[18px] w-8 rounded-full transition-colors', view.animate ? 'bg-amber-400' : 'bg-zinc-600')}>
+        <span className={cx('relative h-[18px] w-8 rounded-full transition-colors', view.animate ? 'bg-claude-500' : 'bg-zinc-600')}>
           <span
             className={cx(
               'absolute top-[2px] h-[14px] w-[14px] rounded-full bg-white shadow transition-[left]',
@@ -158,9 +158,9 @@ function Thinking({ since, animate }: { since: number | null; animate: boolean }
   return (
     <div className="flex items-center gap-2 text-[13.5px] text-zinc-400">
       <span className="flex gap-1">
-        <span className="busy-dot h-1.5 w-1.5 rounded-full bg-amber-400" />
-        <span className="busy-dot h-1.5 w-1.5 rounded-full bg-amber-400" />
-        <span className="busy-dot h-1.5 w-1.5 rounded-full bg-amber-400" />
+        <span className="busy-dot h-1.5 w-1.5 rounded-full bg-claude-500" />
+        <span className="busy-dot h-1.5 w-1.5 rounded-full bg-claude-500" />
+        <span className="busy-dot h-1.5 w-1.5 rounded-full bg-claude-500" />
       </span>
       {animate ? 'Tracing your code step by step…' : 'Reading what you highlighted…'}
       <span className="tabular-nums text-zinc-500">{seconds}s</span>
@@ -172,7 +172,7 @@ function Thinking({ since, animate }: { since: number | null; animate: boolean }
 function StartingBar() {
   return (
     <div className="mt-3 h-1 overflow-hidden rounded-full bg-white/10">
-      <div className="island-fill h-full rounded-full bg-amber-400" />
+      <div className="island-fill h-full rounded-full bg-claude-500" />
     </div>
   )
 }
@@ -191,7 +191,7 @@ function FollowUp() {
     }
   }
   return (
-    <div className="mt-3 flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.05] py-1 pl-3 pr-1 focus-within:border-amber-400/70">
+    <div className="mt-3 flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.05] py-1 pl-3 pr-1 focus-within:border-claude-500/70">
       <input
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -204,7 +204,7 @@ function FollowUp() {
         onClick={send}
         disabled={!text.trim()}
         title="Send"
-        className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-400 text-zinc-950 disabled:opacity-40"
+        className="flex h-8 w-8 items-center justify-center rounded-lg bg-claude-500 text-white disabled:opacity-40"
       >
         <SendIcon size={14} />
       </button>
@@ -219,7 +219,7 @@ export function AskButton({ onAsk = () => islandApi.ask() }: { onAsk?: () => voi
       type="button"
       onMouseDown={(e) => e.preventDefault()} // keep the highlight in the browser mock
       onClick={onAsk}
-      className="flex h-9 items-center gap-1.5 rounded-full bg-amber-400 pl-2 pr-4 text-[14px] font-semibold text-zinc-950 shadow-[0_6px_20px_rgba(0,0,0,0.35)] ring-1 ring-black/10 hover:bg-amber-300"
+      className="flex h-9 items-center gap-1.5 rounded-full bg-claude-500 pl-2 pr-4 text-[14px] font-semibold text-zinc-950 shadow-[0_6px_20px_rgba(0,0,0,0.35)] ring-1 ring-black/10 hover:bg-claude-400"
     >
       <Logo size={17} /> Ask
     </button>

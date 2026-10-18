@@ -8,11 +8,12 @@ import type {
   CluelessApi,
   MemoryView,
   SessionView,
+  StageShow,
   ThreadItem,
   TurnView,
   VoiceStateEvent
 } from '../../../shared/contracts'
-import { MOCK_AFTER_RECAP, MOCK_GAPS, MOCK_PROBLEM, MOCK_RECAP, MOCK_TURNS } from './fixtures'
+import { MOCK_AFTER_RECAP, MOCK_ANIMATIONS, MOCK_GAPS, MOCK_PROBLEM, MOCK_RECAP, MOCK_TURNS } from './fixtures'
 
 const DELAY = 700
 
@@ -21,6 +22,8 @@ export function createMockApi(): CluelessApi {
   let step = 0
   const listeners = new Set<(v: SessionView | null) => void>()
   const voiceStates = new Set<(e: VoiceStateEvent) => void>()
+  const stageListeners = new Set<(s: StageShow | null) => void>()
+  const showStage = (show: StageShow | null): void => stageListeners.forEach((cb) => cb(show))
   let cards: CardView[] = [
     { id: 'c1', subject: 'math', topic: 'integration by parts', front: 'What is the integration by parts formula?', back: '$\\int u\\,dv = uv - \\int v\\,du$', due: new Date().toISOString() },
     { id: 'c2', subject: 'coding', topic: 'Valid Sudoku', front: 'Python: make a list of 9 empty sets', back: '`[set() for _ in range(9)]`', due: new Date().toISOString() }
@@ -152,6 +155,10 @@ export function createMockApi(): CluelessApi {
           }
         })
       }
+      if (action === 'animate_code' || action === 'animate_problem' || action === 'animate_question') {
+        const target = action === 'animate_code' ? 'code' : action === 'animate_problem' ? 'problem' : 'question'
+        return reply('Getting the animation ready…', () => pushTutor({ ...MOCK_ANIMATIONS[target], plan: MOCK_TURNS[step].plan }))
+      }
       if (action === 'reveal') view.revealed = true
       reply(action === 'hint' ? 'Thinking of a hint…' : 'Thinking…', nextTurn)
     },
@@ -195,6 +202,16 @@ export function createMockApi(): CluelessApi {
       return () => voiceStates.delete(cb)
     },
     onVoiceToggle: () => () => {},
-    tts: async () => ({ ok: false, reason: 'no-key', message: 'ElevenLabs runs in the desktop app.' })
+    tts: async () => ({ ok: false, reason: 'no-key', message: 'ElevenLabs runs in the desktop app.' }),
+    playOnScreen: (play) => {
+      // The panel, so the floating card stays out from under it (the real app gets this from the window).
+      const panel = document.querySelector('.glass-panel')?.getBoundingClientRect()
+      showStage({ ...play, avoid: panel ? { x: panel.x, y: panel.y, width: panel.width, height: panel.height } : null })
+    },
+    stopOnScreen: () => showStage(null),
+    onStage: (cb) => {
+      stageListeners.add(cb)
+      return () => stageListeners.delete(cb)
+    }
   }
 }

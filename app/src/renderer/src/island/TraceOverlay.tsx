@@ -197,7 +197,7 @@ function stepBadge(trace: CodeTrace, step: TraceStep, index: number): { text: st
     const yes = step.result.toLowerCase() === 'true'
     return { text: yes ? '✓ true' : '✗ false', tone: yes ? 'bg-emerald-400 text-zinc-950' : 'bg-rose-500 text-white' }
   }
-  if (step.kind === 'loop') return { text: `↻ pass ${loopPass(trace, index)}`, tone: 'bg-amber-300 text-zinc-950' }
+  if (step.kind === 'loop') return { text: `↻ pass ${loopPass(trace, index)}`, tone: 'bg-claude-400 text-zinc-950' }
   if (step.kind === 'return') return { text: step.result ? `→ ${step.result}` : 'return', tone: 'bg-sky-400 text-zinc-950' }
   return null
 }

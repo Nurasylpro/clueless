@@ -175,6 +175,7 @@ export const StopIcon = (p: IconProps) => (
     <rect x="6" y="6" width="12" height="12" rx="1.5" />
   </Icon>
 )
+
 export const ChevronDownIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="m6 9 6 6 6-6" />

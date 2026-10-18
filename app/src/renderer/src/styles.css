@@ -156,7 +156,20 @@ body.mock-desktop {
 /* The panel grows with its content (a dragged height is only a minimum, and the reply fills any
    extra room). Once it hits the screen-height cap, only the latest reply shrinks and scrolls;
    the header, problem bar, plan, buttons and answer box keep their size. */
-.glass-panel > .session-screen {
+.glass-panel > .panel-body {
+  /* the conversation, and in explain mode the animation pane to its left */
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.panel-body > .panel-main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.panel-main > .session-screen {
   flex: 1 1 auto;
   min-height: 0;
 }
