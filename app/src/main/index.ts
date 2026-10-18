@@ -9,6 +9,7 @@ import {
   type InputKind,
   type Rect,
   type SessionView,
+  type StepIntent,
   type Subject,
   type UserAction
 } from '../shared/contracts'
@@ -221,6 +222,9 @@ function setup(): void {
     if (typeof arg?.text === 'string') void controller.send(arg.text.slice(0, 4000), arg.as)
   })
   ipcMain.on(IPC.action, (_e, action: UserAction) => void controller.action(action))
+  ipcMain.on(IPC.step, (_e, arg: { id: number; intent: StepIntent }) => {
+    if (typeof arg?.id === 'number' && ['stuck', 'revisit', 'claim'].includes(arg.intent)) void controller.step(arg.id, arg.intent)
+  })
   ipcMain.on(IPC.setSubject, (_e, subject: Subject) => controller.setSubject(subject))
   // Compact mode needs nothing here: the panel shrinks to its header and fitHeight follows it.
   ipcMain.on(IPC.windowMode, () => {})

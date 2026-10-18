@@ -21,6 +21,9 @@ export type Tag =
   | 'STUCK'
   | 'REVEAL'
   | 'RECAP'
+  | 'STEP STUCK'
+  | 'STEP REVISIT'
+  | 'STEP CLAIM'
 
 export interface ImageInput {
   data: string // base64, no data: prefix

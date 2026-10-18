@@ -48,7 +48,8 @@ export function createMockApi(): CluelessApi {
   const pushTutor = (turn: TurnView): void => {
     if (!view) return
     view.thread.push({ id: crypto.randomUUID(), role: 'tutor', turn, at: Date.now() })
-    view.plan = turn.plan
+    // Like the real app: locked steps arrive without their text.
+    view.plan = turn.plan.map((s) => (s.status === 'locked' ? { ...s, text: '' } : s))
     view.expects = turn.expects
     view.choices = turn.choices
     if (turn.verdict !== 'none') {
@@ -153,6 +154,13 @@ export function createMockApi(): CluelessApi {
       }
       if (action === 'reveal') view.revealed = true
       reply(action === 'hint' ? 'Thinking of a hint…' : 'Thinking…', nextTurn)
+    },
+    step: (id, intent) => {
+      if (!view) return
+      const n = view.plan.findIndex((s) => s.id === id) + 1
+      const text = intent === 'stuck' ? `Stuck on step ${n}` : intent === 'revisit' ? `Back to step ${n}` : `I think I've done step ${n}`
+      view.thread.push({ id: crypto.randomUUID(), role: 'student', text, as: 'text', check: null, at: Date.now() })
+      reply(intent === 'stuck' ? 'Thinking of a hint…' : 'Thinking…', nextTurn)
     },
     setSubject: (subject) => {
       if (view?.problem) view.problem.subject = subject

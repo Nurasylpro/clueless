@@ -131,4 +131,45 @@ describe('SessionController', () => {
     expect(last()!.error).toBeNull()
     expect(tutor.sent.at(-1)?.tag).toBe('HINT')
   })
+
+  describe('plan steps', () => {
+    const plan = [
+      { id: 1, text: 'Write the formula', status: 'done' as const },
+      { id: 2, text: 'Pick u and dv', status: 'current' as const },
+      { id: 3, text: 'SECRET STRATEGY', status: 'locked' as const }
+    ]
+    const started = async () => {
+      const s = setup()
+      s.tutor.start = async () => ({
+        problem: { subject: 'math', title: 'P', summary: '', language: null, hiddenSolution: '' },
+        turn: turn({ plan }),
+        recap: null
+      })
+      await s.controller.startProblem({ text: 'p' })
+      return s
+    }
+
+    it("never sends a locked step's text to the UI", async () => {
+      const { views, last } = await started()
+      expect(JSON.stringify(views)).not.toContain('SECRET STRATEGY')
+      expect(last().plan.map((p) => p.text)).toEqual(['Write the formula', 'Pick u and dv', ''])
+    })
+
+    it('tells the tutor which step was clicked, with its full text', async () => {
+      const { controller, tutor, last } = await started()
+      await controller.step(2, 'stuck')
+      expect(tutor.sent.at(-1)).toMatchObject({ tag: 'STEP STUCK', text: 'step 2: Pick u and dv' })
+      expect(last().thread.some((t) => t.role === 'student' && t.text === 'Stuck on step 2')).toBe(true)
+    })
+
+    it('ignores clicks that do not match the step state', async () => {
+      const { controller, tutor } = await started()
+      await controller.step(2, 'revisit') // step 2 is current, not done
+      await controller.step(1, 'claim') // step 1 is done, not locked
+      await controller.step(9, 'stuck') // no such step
+      expect(tutor.sent).toHaveLength(0)
+      await controller.step(3, 'claim')
+      expect(tutor.sent.at(-1)).toMatchObject({ tag: 'STEP CLAIM', text: 'step 3: SECRET STRATEGY' })
+    })
+  })
 })

@@ -124,6 +124,9 @@ export type UserAction =
   | 'new'
   | 'retry'
 
+/** The student clicked a plan step: stuck on the current one, back to a done one, or "I've done this" on a locked one. */
+export type StepIntent = 'stuck' | 'revisit' | 'claim'
+
 export type WindowMode = 'compact' | 'expanded'
 
 export interface AppStatus {
@@ -186,6 +189,7 @@ export const IPC = {
   askText: 'user:ask-text', // the problem typed or pasted as text
   send: 'user:send', // { text, as }
   action: 'user:action', // UserAction
+  step: 'user:step', // { id, intent }: a plan step was clicked
   setSubject: 'user:subject', // Subject
   windowMode: 'window:mode', // WindowMode
   fitHeight: 'window:fit-height', // number: the panel's height in px; the window follows it
@@ -249,6 +253,7 @@ export interface CluelessApi {
   askText(text: string): void
   send(input: { text: string; as: InputKind }): void
   action(action: UserAction): void
+  step(id: number, intent: StepIntent): void
   setSubject(subject: Subject): void
   setWindowMode(mode: WindowMode): void
   fitHeight(px: number): void

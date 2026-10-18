@@ -9,6 +9,7 @@ import type {
   ProblemView,
   RecapView,
   SessionView,
+  StepIntent,
   Subject,
   TurnView
 } from '../../../shared/contracts'
@@ -50,7 +51,7 @@ export function SessionScreen({ session, onOpenReview }: { session: SessionView;
   return (
     <div className="session-screen flex min-h-0 flex-col">
       {session.problem && <ProblemBar problem={session.problem} />}
-      {session.plan.length > 0 && <PlanList plan={session.plan} />}
+      {session.plan.length > 0 && <PlanList plan={session.plan} disabled={!ready || Boolean(session.recap)} />}
       <LatestExchange session={session} onOpenReview={onOpenReview} onReadAloud={conv.readAloud} />
       {session.stuck.level === 2 && !session.busy && !session.recap && (
         <StuckBubble reason={session.stuck.reason} onRecall={() => setMode('recall')} />
@@ -92,7 +93,14 @@ function ProblemBar({ problem }: { problem: ProblemView }) {
   )
 }
 
-function PlanList({ plan }: { plan: PlanStep[] }) {
+/** What clicking a step means, by its status. */
+const STEP_CLICK: Record<PlanStep['status'], { intent: StepIntent; hint: string; title: string }> = {
+  current: { intent: 'stuck', hint: 'Stuck?', title: 'Stuck on this step? Click for a hint about it' },
+  done: { intent: 'revisit', hint: 'Go back', title: 'Go back to this step' },
+  locked: { intent: 'claim', hint: 'Done it?', title: "Already done this? Click and Clueless will check" }
+}
+
+function PlanList({ plan, disabled }: { plan: PlanStep[]; disabled: boolean }) {
   const [open, setOpen] = useState(false)
   const current = plan.findIndex((s) => s.status === 'current')
   const done = plan.filter((s) => s.status === 'done').length
@@ -123,25 +131,44 @@ function PlanList({ plan }: { plan: PlanStep[] }) {
       </button>
       <ol className="space-y-0.5">
         {shown.map((s) => (
-          <li
-            key={s.id}
-            className={cx(
-              'flex items-start gap-2 text-[12.5px]',
-              s.status === 'current' && 'font-medium text-zinc-900 dark:text-zinc-50',
-              s.status === 'done' && 'text-zinc-400 line-through decoration-zinc-300 dark:decoration-zinc-600',
-              s.status === 'locked' && 'text-zinc-400 dark:text-zinc-500'
-            )}
-          >
-            <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
-              {s.status === 'done' ? (
-                <CheckIcon size={13} className="text-emerald-500" />
-              ) : s.status === 'locked' ? (
-                <LockIcon size={11} />
-              ) : (
-                <span className="h-2 w-2 rounded-full bg-claude-500" />
+          <li key={s.id}>
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={() => api.step(s.id, STEP_CLICK[s.status].intent)}
+              title={disabled ? undefined : STEP_CLICK[s.status].title}
+              className={cx(
+                'no-drag group -mx-1 flex w-[calc(100%+0.5rem)] items-start gap-2 rounded-md px-1 py-px text-left text-[12.5px] transition-colors',
+                'enabled:hover:bg-zinc-900/5 disabled:cursor-default dark:enabled:hover:bg-white/10',
+                s.status === 'current' && 'font-medium text-zinc-900 dark:text-zinc-50',
+                s.status !== 'current' && 'text-zinc-400',
+                s.status === 'locked' && 'dark:text-zinc-500'
               )}
-            </span>
-            {s.text}
+            >
+              <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
+                {s.status === 'done' ? (
+                  <CheckIcon size={13} className="text-emerald-500" />
+                ) : s.status === 'locked' ? (
+                  <LockIcon size={11} />
+                ) : (
+                  <span className="h-2 w-2 rounded-full bg-claude-500" />
+                )}
+              </span>
+              {/* Locked steps arrive without text: they'd give the strategy away. */}
+              <span
+                className={cx(
+                  'min-w-0 flex-1',
+                  s.status === 'done' && 'line-through decoration-zinc-300 dark:decoration-zinc-600'
+                )}
+              >
+                {s.status === 'locked' ? `Step ${plan.indexOf(s) + 1}` : s.text}
+              </span>
+              {!disabled && (
+                <span className="shrink-0 text-[10.5px] font-normal text-claude-500 opacity-0 transition-opacity group-hover:opacity-100">
+                  {STEP_CLICK[s.status].hint}
+                </span>
+              )}
+            </button>
           </li>
         ))}
       </ol>
