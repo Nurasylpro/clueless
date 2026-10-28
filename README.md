@@ -6,6 +6,12 @@ Clueless runs in the background and shows up as a small **island** at the top of
 `Cmd/Ctrl + Shift + 2` to show it, **highlight some code** in any app (LeetCode, your editor), and click the
 **Ask** button that appears next to the cursor.
 
+![Animated code walkthrough: variables on the left, the current line highlighted on the right](docs/screenshots/walkthrough.png)
+
+| Highlight code → Ask | Animate off: short explanation |
+|---|---|
+| ![Highlighted code with the Ask button](docs/screenshots/ask.png) | ![Explanation card in the island](docs/screenshots/explain.png) |
+
 - **Animate on:** a centered workspace opens with variables on the left, code on the right, and a
   caption for each step. Scroll inside either pane, zoom the variables, and drag variable names to
   arrange them. Back, Pause/Resume, and speed controls stay inside the workspace.
